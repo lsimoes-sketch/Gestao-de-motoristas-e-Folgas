@@ -3,14 +3,12 @@
  *
  * REGRA 1 — Início de jornada (definida pela operação, 02/10/2026)
  * O início da jornada é calculado a partir do PRIMEIRO serviço do dia do motorista:
- *  • Transfer de chegada, com recolha no Aeroporto de Lisboa:
- *      40 min antes da hora marcada em hora de ponta (dias úteis, 07:00–10:00 e 17:00–20:00);
- *      30 min antes nos restantes períodos, fins de semana e feriados.
- *  • Transfer de saída, com recolha numa morada em Lisboa:
- *      1h30 antes em hora de ponta; 1h00 nos restantes períodos, fins de semana e feriados.
- *  • Serviços que NÃO são transfers (tours, disposições…) seguem a mesma regra
- *    conforme o local de início: Aeroporto de Lisboa → como chegada;
- *    morada na cidade de Lisboa → como saída (complemento de 02/10/2026).
+ *  • Início no Aeroporto de Lisboa (chegadas, e qualquer outro serviço que comece lá):
+ *      30 min antes da hora marcada em hora de ponta (dias úteis, 07:00–10:00 e 17:00–20:00);
+ *      15 min antes nos restantes períodos, fins de semana e feriados.
+ *  • Início numa morada da cidade de Lisboa (saídas para o aeroporto, transfers para
+ *    qualquer outro destino, tours, disposições…):
+ *      1h15 antes em hora de ponta; 1h00 nos restantes períodos, fins de semana e feriados.
  *  • Qualquer outro primeiro serviço: assinalado para inserir o início manualmente.
  * Um início inserido manualmente (exceção) prevalece sempre sobre o calculado.
  *
@@ -25,8 +23,9 @@ export const SHIFT_RULES_CONFIG = {
     { from: '07:00', to: '10:00' },
     { from: '17:00', to: '20:00' },
   ],
-  arrivalAirport: { peakMinutes: 40, offPeakMinutes: 30 },
-  departureLisbon: { peakMinutes: 90, offPeakMinutes: 60 },
+  // Valores revistos pela operação a 02/10/2026
+  arrivalAirport: { peakMinutes: 30, offPeakMinutes: 15 },
+  departureLisbon: { peakMinutes: 75, offPeakMinutes: 60 },
   /** 13 de junho (Santo António) — feriado municipal de Lisboa */
   includeLisbonMunicipalHoliday: true,
 };
@@ -205,9 +204,8 @@ export function computeShiftStart(first: TransportService): StartRuleResult {
     };
   }
 
-  // Começa numa morada em Lisboa → regra da saída.
-  // Transfers: só quando o destino é um aeroporto. Outros serviços: basta começar em Lisboa.
-  const isDeparture = isLisbonAddress(origin) && (isTransfer ? isAirport(destination) : true);
+  // Começa numa morada da cidade de Lisboa → regra da saída (qualquer destino e qualquer tipo de serviço)
+  const isDeparture = isLisbonAddress(origin);
   if (isDeparture) {
     const lead = peak ? SHIFT_RULES_CONFIG.departureLisbon.peakMinutes : SHIFT_RULES_CONFIG.departureLisbon.offPeakMinutes;
     return {
@@ -222,7 +220,6 @@ export function computeShiftStart(first: TransportService): StartRuleResult {
 
   let why = 'o primeiro serviço não começa no Aeroporto de Lisboa nem numa morada em Lisboa';
   if (isAirport(origin) && !isLisbonAirport(origin)) why = 'começa num aeroporto que não é o de Lisboa';
-  else if (isTransfer && isLisbonAddress(origin)) why = 'transfer com início em Lisboa mas sem destino aeroporto';
   else if (!origin.trim()) why = 'o primeiro serviço não tem local de início';
   else if (!/\b\d{4}-\d{3}\b/.test(origin) && !/\blisboa\b|\blisbon\b/i.test(origin))
     why = 'local de início sem código postal (reimporte a Agenda ou insira à mão)';

@@ -26,6 +26,12 @@ interface ShiftsViewProps {
 
 const WEEKDAYS = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
 
+function fmtLead(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const rest = minutes % 60;
+  return `${Math.floor(minutes / 60)}h${rest ? String(rest).padStart(2, '0') : ''}`;
+}
+
 function hhmm(dateTime?: string): string {
   return dateTime ? dateTime.slice(11, 16) : '';
 }
@@ -54,13 +60,13 @@ const RuleBadge: React.FC<{ shift: DriverDayShift }> = ({ shift }) => {
   if (rule.kind === 'CHEGADA_AEROPORTO')
     return (
       <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-sky-100 text-sky-800 border border-sky-200">
-        <PlaneLanding className="w-3 h-3" /> {isTransfer ? 'Chegada aeroporto' : 'Início no aeroporto'} • −{rule.leadMinutes} min{rule.peak ? ' (ponta)' : ''}
+        <PlaneLanding className="w-3 h-3" /> {isTransfer ? 'Chegada aeroporto' : 'Início no aeroporto'} • −{fmtLead(rule.leadMinutes!)}{rule.peak ? ' (ponta)' : ''}
       </span>
     );
   if (rule.kind === 'SAIDA_LISBOA')
     return (
       <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800 border border-indigo-200">
-        <PlaneTakeoff className="w-3 h-3" /> {isTransfer ? 'Saída Lisboa' : 'Início em Lisboa'} • −{rule.leadMinutes! >= 60 ? `${Math.floor(rule.leadMinutes! / 60)}h${rule.leadMinutes! % 60 ? rule.leadMinutes! % 60 : ''}` : `${rule.leadMinutes} min`}
+        <PlaneTakeoff className="w-3 h-3" /> {isTransfer && /aeroporto|airport/i.test(shift.first.destinationAddress || shift.first.destination) ? 'Saída Lisboa' : 'Início em Lisboa'} • −{fmtLead(rule.leadMinutes!)}
         {rule.peak ? ' (ponta)' : ''}
       </span>
     );
@@ -268,8 +274,9 @@ export const ShiftsView: React.FC<ShiftsViewProps> = ({ drivers, services, alloc
             fins de semana e feriados.
           </p>
           <p>
-            <PlaneTakeoff className="w-3.5 h-3.5 inline text-indigo-600" /> <strong>Transfer de saída de uma morada em Lisboa:</strong> 1h30
-            antes em hora de ponta; 1h nos restantes períodos, fins de semana e feriados.
+            <PlaneTakeoff className="w-3.5 h-3.5 inline text-indigo-600" /> <strong>Transfer com início numa morada da cidade de Lisboa</strong>{' '}
+            (para o aeroporto ou qualquer outro destino): {fmtLead(cfg.departureLisbon.peakMinutes)} antes em hora de ponta;{' '}
+            {fmtLead(cfg.departureLisbon.offPeakMinutes)} nos restantes períodos, fins de semana e feriados.
           </p>
           <p>
             <strong>Tours, disposições e outros serviços que não são transfers</strong> seguem a mesma regra conforme onde começam: no
@@ -281,8 +288,8 @@ export const ShiftsView: React.FC<ShiftsViewProps> = ({ drivers, services, alloc
             ponta.
           </p>
           <p>
-            <PenLine className="w-3.5 h-3.5 inline text-amber-600" /> <strong>Restantes casos</strong> (início fora da cidade de Lisboa,
-            outros aeroportos, transfers em Lisboa sem destino aeroporto): inserir o início manualmente. Um valor manual prevalece sempre sobre o da regra.
+            <PenLine className="w-3.5 h-3.5 inline text-amber-600" /> <strong>Restantes casos</strong> (início fora da cidade de Lisboa ou
+            noutro aeroporto): inserir o início manualmente. Um valor manual prevalece sempre sobre o da regra.
           </p>
           <p className="text-slate-500">
             "Morada em Lisboa" = código postal 1000–1999 (concelho de Lisboa). Serviços importados antes desta versão não têm a morada
