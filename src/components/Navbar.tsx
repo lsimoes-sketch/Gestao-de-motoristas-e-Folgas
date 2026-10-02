@@ -13,6 +13,9 @@ import {
   RefreshCw,
   CheckCircle2,
   Save,
+  LogOut,
+  UserCog,
+  CloudOff,
 } from 'lucide-react';
 
 export type ActiveTab =
@@ -36,6 +39,14 @@ interface NavbarProps {
     lastSavedTime: string | null;
     onSaveNow?: () => void;
   };
+  /** Presente quando a app usa a base de dados partilhada da equipa. */
+  sharedSession?: {
+    email: string;
+    onSignOut: () => void;
+    onOpenTeam: () => void;
+    syncError?: string | null;
+    isLive?: boolean;
+  };
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -46,7 +57,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   criticalAlertsCount = 0,
   onOpenBackupModal,
   autoSaveInfo,
+  sharedSession,
 }) => {
+  const isShared = !!sharedSession;
   const navItems = [
     {
       id: 'dashboard' as ActiveTab,
@@ -147,7 +160,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             {/* Auto-Save Indicator */}
-            {autoSaveInfo ? (
+            {sharedSession?.syncError ? (
+              <button
+                type="button"
+                onClick={autoSaveInfo?.onSaveNow}
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg border border-rose-300 font-semibold"
+                title={sharedSession.syncError}
+              >
+                <CloudOff className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">Erro ao gravar • tentar de novo</span>
+              </button>
+            ) : autoSaveInfo ? (
               <div className="flex items-center gap-2">
                 {autoSaveInfo.isSaving ? (
                   <div className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-700 rounded-lg border border-blue-200 font-medium">
@@ -159,10 +182,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                     type="button"
                     onClick={autoSaveInfo.onSaveNow}
                     className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg border border-amber-300 font-medium transition-colors cursor-pointer"
-                    title="Existem alterações pendentes. O auto-save grava automaticamente a cada 30s ou clique para salvar agora imediatamente."
+                    title={isShared ? 'A enviar alterações para a base de dados da equipa.' : 'Existem alterações pendentes. O auto-save grava automaticamente a cada 30s ou clique para salvar agora imediatamente.'}
                   >
                     <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping shrink-0"></span>
-                    <span className="hidden md:inline">Auto-save pendente (30s)</span>
+                    <span className="hidden md:inline">{isShared ? 'Por sincronizar' : 'Auto-save pendente (30s)'}</span>
                     <span className="text-[10px] font-bold bg-amber-200/80 px-1 py-0.2 rounded text-amber-900 flex items-center gap-1">
                       <Save className="w-2.5 h-2.5" />
                       Salvar Já
@@ -171,10 +194,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 ) : (
                   <div
                     className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-lg border border-emerald-200 font-medium"
-                    title="Auto-save periódico ativo (a cada 30 segundos). Todas as alterações de motoristas, veículos e serviços são salvas automaticamente em produção."
+                    title={isShared ? 'Todas as alterações estão gravadas na base de dados partilhada e chegam à equipa em tempo real.' : 'Auto-save periódico ativo (a cada 30 segundos). Todas as alterações de motoristas, veículos e serviços são salvas automaticamente em produção.'}
                   >
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                    <span>Auto-Save Ativo (30s)</span>
+                    <span>{isShared ? (sharedSession?.isLive ? 'Sincronizado • tempo real' : 'Sincronizado') : 'Auto-Save Ativo (30s)'}</span>
                     {autoSaveInfo.lastSavedTime && (
                       <span className="text-[10px] text-emerald-600/80 font-normal">
                         • {autoSaveInfo.lastSavedTime}
@@ -187,6 +210,29 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-lg border border-emerald-200 font-medium">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                 Sistema Operacional Ativo
+              </div>
+            )}
+
+            {sharedSession && (
+              <div className="flex items-center gap-1.5 pl-2 border-l border-slate-200">
+                <button
+                  type="button"
+                  onClick={sharedSession.onOpenTeam}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-semibold"
+                  title={`Sessão: ${sharedSession.email} • Gerir quem tem acesso`}
+                >
+                  <UserCog className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                  <span className="hidden xl:inline max-w-[160px] truncate">{sharedSession.email}</span>
+                  <span className="xl:hidden">Equipa</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={sharedSession.onSignOut}
+                  className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+                  title="Sair"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
               </div>
             )}
           </div>

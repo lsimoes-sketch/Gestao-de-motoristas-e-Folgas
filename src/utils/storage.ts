@@ -38,9 +38,19 @@ export function loadFromStorage<T>(key: string, fallback: T): T {
 }
 
 /**
+ * Com a base de dados partilhada ativa, os dados NÃO são guardados no browser
+ * (evita cópias de dados pessoais dos motoristas em computadores partilhados).
+ */
+let localPersistenceEnabled = true;
+export function setLocalPersistenceEnabled(enabled: boolean) {
+  localPersistenceEnabled = enabled;
+}
+
+/**
  * Safely saves data to localStorage
  */
 export function saveToStorage<T>(key: string, data: T): boolean {
+  if (!localPersistenceEnabled) return true;
   if (typeof window === 'undefined' || !window.localStorage) {
     return false;
   }
@@ -68,6 +78,7 @@ export interface AppStoragePayload {
  * Safely saves all application states to localStorage in a single batch
  */
 export function saveAllToStorage(payload: AppStoragePayload): boolean {
+  if (!localPersistenceEnabled) return true;
   if (typeof window === 'undefined' || !window.localStorage) {
     return false;
   }

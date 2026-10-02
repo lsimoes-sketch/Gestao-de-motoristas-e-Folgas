@@ -103,7 +103,7 @@ export const DriversFleetView: React.FC<DriversFleetViewProps> = ({
           triggerToast('Erro ao guardar alterações de motoristas.', 'error');
         }
       } else {
-        triggerToast('Base de dados de motoristas sincronizada e persistida localmente no navegador.');
+        triggerToast('Base de dados de motoristas gravada.');
       }
     } else {
       if (onManualSaveVehicles) {
@@ -114,7 +114,7 @@ export const DriversFleetView: React.FC<DriversFleetViewProps> = ({
           triggerToast('Erro ao guardar alterações da frota de veículos.', 'error');
         }
       } else {
-        triggerToast('Base de dados da frota de veículos sincronizada e persistida localmente no navegador.');
+        triggerToast('Base de dados da frota de veículos gravada.');
       }
     }
   };
@@ -1200,7 +1200,7 @@ export const DriversFleetView: React.FC<DriversFleetViewProps> = ({
               <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-2.5 text-xs text-emerald-900">
                 <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
                 <div className="leading-tight">
-                  <span className="font-bold">Persistência em Produção Ativa:</span> O novo motorista será guardado de imediato e estará sempre disponível nesta máquina/navegador.
+                  <span className="font-bold">Persistência em Produção Ativa:</span> O novo motorista será guardado de imediato.
                 </div>
               </div>
 

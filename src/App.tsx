@@ -17,7 +17,22 @@ import {
   saveToStorage,
   saveAllToStorage,
   getLastSavedTimestamp,
+  setLocalPersistenceEnabled,
 } from './utils/storage';
+import type { Session } from '@supabase/supabase-js';
+import { supabase, isSharedMode } from './lib/supabase';
+import {
+  loadAll,
+  pushChanges,
+  subscribeToChanges,
+  emptySnapshot,
+  stableStringify,
+  SyncedSnapshot,
+  RemoteChange,
+} from './lib/sharedStore';
+import { LoginScreen } from './components/LoginScreen';
+import { TeamAccessModal } from './components/TeamAccessModal';
+import { Loader2, ShieldX } from 'lucide-react';
 import {
   INITIAL_DRIVERS,
   INITIAL_VEHICLES,
@@ -37,37 +52,64 @@ import {
   FreelancerSettlement,
 } from './types';
 
+// Com a base partilhada ativa, nada é guardado no browser
+setLocalPersistenceEnabled(!isSharedMode);
+
+/** Estado inicial: no modo partilhado começa vazio (os dados vêm da base de dados). */
+function initialState<T>(key: string, fallback: T[]): T[] {
+  return isSharedMode ? [] : loadFromStorage<T[]>(key, fallback);
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
 
+  // =========================================================================
+  // Base de dados partilhada (Supabase): sessão, carregamento e sincronização
+  // =========================================================================
+  const [session, setSession] = useState<Session | null>(null);
+  const [authReady, setAuthReady] = useState(!isSharedMode);
+  const [dataStatus, setDataStatus] = useState<'idle' | 'loading' | 'ready' | 'denied' | 'error'>(
+    isSharedMode ? 'idle' : 'ready'
+  );
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [isLive, setIsLive] = useState(false);
+  const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
+  const snapshotRef = useRef<SyncedSnapshot>(emptySnapshot());
+  const pushInFlightRef = useRef(false);
+  const pushAgainRef = useRef(false);
+  // Só se grava na base de dados depois de os dados estarem totalmente carregados
+  const sharedReadyRef = useRef(false);
+
   // Application Data States initialized with persistent local storage
   const [drivers, setDrivers] = useState<Driver[]>(() =>
-    loadFromStorage<Driver[]>(STORAGE_KEYS.DRIVERS, INITIAL_DRIVERS)
+    initialState<Driver>(STORAGE_KEYS.DRIVERS, INITIAL_DRIVERS)
   );
   const [vehicles, setVehicles] = useState<Vehicle[]>(() =>
-    loadFromStorage<Vehicle[]>(STORAGE_KEYS.VEHICLES, INITIAL_VEHICLES)
+    initialState<Vehicle>(STORAGE_KEYS.VEHICLES, INITIAL_VEHICLES)
   );
   const [services, setServices] = useState<TransportService[]>(() =>
-    loadFromStorage<TransportService[]>(STORAGE_KEYS.SERVICES, INITIAL_SERVICES)
+    initialState<TransportService>(STORAGE_KEYS.SERVICES, INITIAL_SERVICES)
   );
   const [allocations, setAllocations] = useState<Allocation[]>(() =>
-    loadFromStorage<Allocation[]>(STORAGE_KEYS.ALLOCATIONS, INITIAL_ALLOCATIONS)
+    initialState<Allocation>(STORAGE_KEYS.ALLOCATIONS, INITIAL_ALLOCATIONS)
   );
   const [shiftScales, setShiftScales] = useState<ShiftScaleConfig[]>(() =>
-    loadFromStorage<ShiftScaleConfig[]>(STORAGE_KEYS.SHIFT_SCALES, INITIAL_SHIFT_SCALES)
+    initialState<ShiftScaleConfig>(STORAGE_KEYS.SHIFT_SCALES, INITIAL_SHIFT_SCALES)
   );
   const [dayOffs, setDayOffs] = useState<DayOffRecord[]>(() =>
-    loadFromStorage<DayOffRecord[]>(STORAGE_KEYS.DAY_OFFS, INITIAL_DAY_OFFS)
+    initialState<DayOffRecord>(STORAGE_KEYS.DAY_OFFS, INITIAL_DAY_OFFS)
   );
   const [settlements, setSettlements] = useState<FreelancerSettlement[]>(() =>
-    loadFromStorage<FreelancerSettlement[]>(STORAGE_KEYS.SETTLEMENTS, INITIAL_SETTLEMENTS)
+    initialState<FreelancerSettlement>(STORAGE_KEYS.SETTLEMENTS, INITIAL_SETTLEMENTS)
   );
 
   // =========================================================================
   // Periodic Debounced Auto-Save Engine (30-second interval / debounce)
   // Automatically persists all states to localStorage in production
   // =========================================================================
-  const AUTO_SAVE_INTERVAL_MS = 30000;
+  // Local: grava a cada 30s. Partilhado: envia para a base de dados ~1s após cada alteração.
+  const AUTO_SAVE_INTERVAL_MS = isSharedMode ? 1000 : 30000;
 
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -112,11 +154,45 @@ export default function App() {
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isInitialMount = useRef(true);
 
+  // Envia as diferenças para a base de dados partilhada (uma operação de cada vez)
+  const runSharedPush = useCallback(async () => {
+    if (!isSharedMode || !sharedReadyRef.current) return;
+    if (pushInFlightRef.current) {
+      pushAgainRef.current = true;
+      return;
+    }
+    pushInFlightRef.current = true;
+    setIsSaving(true);
+    try {
+      do {
+        pushAgainRef.current = false;
+        await pushChanges(payloadRef.current, snapshotRef.current);
+      } while (pushAgainRef.current);
+      hasUnsavedChangesRef.current = false;
+      setHasUnsavedChanges(false);
+      setSyncError(null);
+      setLastSavedTime(
+        new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      );
+    } catch (err: any) {
+      console.error('[Sync] Falha ao gravar na base de dados:', err);
+      setSyncError(err?.message || 'Erro desconhecido ao gravar.');
+    } finally {
+      pushInFlightRef.current = false;
+      setIsSaving(false);
+    }
+  }, []);
+
   // Core save function: saves all states to localStorage at once
   const saveAllNow = useCallback(() => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
+    }
+
+    if (isSharedMode) {
+      runSharedPush();
+      return true;
     }
 
     setIsSaving(true);
@@ -190,15 +266,22 @@ export default function App() {
 
   // Flush pending changes synchronously on tab close, refresh or backgrounding
   useEffect(() => {
-    const handleBeforeUnload = () => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (hasUnsavedChangesRef.current) {
+        if (isSharedMode) {
+          // Ainda há alterações a caminho da base de dados: pedir confirmação
+          e.preventDefault();
+          e.returnValue = '';
+          return;
+        }
         saveAllToStorage(payloadRef.current);
       }
     };
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden' && hasUnsavedChangesRef.current) {
-        saveAllToStorage(payloadRef.current);
+        if (isSharedMode) runSharedPush();
+        else saveAllToStorage(payloadRef.current);
       }
     };
 
@@ -210,6 +293,127 @@ export default function App() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
+
+  // -------------------------------------------------------------------------
+  // Modo partilhado: sessão de login
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (!isSharedMode || !supabase) return;
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setAuthReady(true);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+      setAuthReady(true);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  type CollectionSetter = React.Dispatch<React.SetStateAction<any[]>>;
+  const collectionSetters: Record<keyof typeof payloadRef.current, CollectionSetter> = {
+    drivers: setDrivers,
+    vehicles: setVehicles,
+    services: setServices,
+    allocations: setAllocations,
+    shiftScales: setShiftScales,
+    dayOffs: setDayOffs,
+    settlements: setSettlements,
+  };
+  const settersRef = useRef(collectionSetters);
+  settersRef.current = collectionSetters;
+
+  const userId = session?.user?.id;
+
+  // Carregar os dados da base partilhada depois do login
+  const loadSharedData = useCallback(async () => {
+    if (!isSharedMode || !supabase) return;
+    sharedReadyRef.current = false;
+    setDataStatus('loading');
+    setDataError(null);
+    try {
+      const { data: isMember, error: memberError } = await supabase.rpc('is_team_member');
+      if (memberError) throw memberError;
+      if (!isMember) {
+        setDataStatus('denied');
+        return;
+      }
+      const { payload, snapshot } = await loadAll();
+      // Estado e snapshot passam a coincidir no mesmo instante (nada a gravar)
+      payloadRef.current = payload;
+      snapshotRef.current = snapshot;
+      setDrivers(payload.drivers);
+      setVehicles(payload.vehicles);
+      setServices(payload.services);
+      setAllocations(payload.allocations);
+      setShiftScales(payload.shiftScales);
+      setDayOffs(payload.dayOffs);
+      setSettlements(payload.settlements);
+      sharedReadyRef.current = true;
+      setDataStatus('ready');
+    } catch (err: any) {
+      console.error('[Sync] Falha ao carregar dados:', err);
+      setDataError(err?.message || 'Erro desconhecido.');
+      setDataStatus('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isSharedMode) return;
+    if (userId) {
+      loadSharedData();
+    } else {
+      // Sem sessão: limpar tudo da memória
+      sharedReadyRef.current = false;
+      snapshotRef.current = emptySnapshot();
+      (Object.values(settersRef.current) as CollectionSetter[]).forEach(set => set([]));
+      setDataStatus('idle');
+    }
+  }, [userId, loadSharedData]);
+
+  // Receber em tempo real as alterações feitas por outros membros da equipa
+  useEffect(() => {
+    if (!isSharedMode || dataStatus !== 'ready') return;
+
+    const applyRemote = (change: RemoteChange) => {
+      const synced = snapshotRef.current[change.key];
+      const current = (payloadRef.current[change.key] as { id: string }[]).find(i => i.id === change.id);
+      const syncedJson = synced.get(change.id);
+      // Se este registo tem alterações locais ainda por gravar, a versão local prevalece
+      const hasLocalPending = current ? stableStringify(current) !== syncedJson : syncedJson !== undefined;
+
+      if (change.type === 'DELETE') {
+        synced.delete(change.id);
+        if (!hasLocalPending || !current) {
+          settersRef.current[change.key](prev => prev.filter((i: any) => i.id !== change.id));
+        }
+        return;
+      }
+
+      const remoteJson = stableStringify(change.data);
+      if (remoteJson === syncedJson) return; // eco da nossa própria gravação
+      if (hasLocalPending && current && stableStringify(current) !== remoteJson) return;
+
+      synced.set(change.id, remoteJson);
+      settersRef.current[change.key](prev => {
+        const exists = prev.some((i: any) => i.id === change.id);
+        return exists ? prev.map((i: any) => (i.id === change.id ? change.data : i)) : [change.data, ...prev];
+      });
+    };
+
+    const unsubscribe = subscribeToChanges(applyRemote, status => setIsLive(status === 'SUBSCRIBED'));
+    return () => {
+      unsubscribe();
+      setIsLive(false);
+    };
+  }, [dataStatus]);
+
+  const handleSignOut = async () => {
+    if (hasUnsavedChangesRef.current) {
+      await runSharedPush();
+    }
+    await supabase?.auth.signOut();
+  };
 
   const [isNewServiceModalOpen, setIsNewServiceModalOpen] = useState(false);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
@@ -431,6 +635,69 @@ export default function App() {
       !allocations.some(a => a.serviceId === s.id && a.status !== 'CANCELADO')
   ).length;
 
+  // ---------------------------------------------------------------------
+  // Ecrãs do modo partilhado (antes de os dados estarem disponíveis)
+  // ---------------------------------------------------------------------
+  if (isSharedMode) {
+    const centered = (content: React.ReactNode) => (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">{content}</div>
+    );
+
+    if (!authReady) {
+      return centered(<Loader2 className="w-6 h-6 animate-spin text-slate-400" />);
+    }
+    if (!session) {
+      return <LoginScreen />;
+    }
+    if (dataStatus === 'denied') {
+      return centered(
+        <div className="max-w-md bg-white rounded-2xl border border-slate-200 p-6 text-center space-y-3 shadow-xs">
+          <ShieldX className="w-10 h-10 text-rose-600 mx-auto" />
+          <h2 className="text-base font-bold text-slate-900">Sem acesso aos dados</h2>
+          <p className="text-sm text-slate-600">
+            Entrou como <strong>{session.user.email}</strong>, mas este email não está na lista da equipa.
+            Peça a um colega para o adicionar em "Equipa".
+          </p>
+          <button
+            onClick={() => supabase?.auth.signOut()}
+            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-sm font-bold"
+          >
+            Sair e usar outro email
+          </button>
+        </div>
+      );
+    }
+    if (dataStatus === 'error') {
+      return centered(
+        <div className="max-w-md bg-white rounded-2xl border border-slate-200 p-6 text-center space-y-3 shadow-xs">
+          <h2 className="text-base font-bold text-slate-900">Não foi possível carregar os dados</h2>
+          <p className="text-xs text-slate-500 break-words">{dataError}</p>
+          <div className="flex justify-center gap-2">
+            <button
+              onClick={loadSharedData}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-bold"
+            >
+              Tentar de novo
+            </button>
+            <button
+              onClick={() => supabase?.auth.signOut()}
+              className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-xl text-sm font-bold"
+            >
+              Sair
+            </button>
+          </div>
+        </div>
+      );
+    }
+    if (dataStatus !== 'ready') {
+      return centered(
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Loader2 className="w-5 h-5 animate-spin" />A carregar os dados da equipa…
+        </div>
+      );
+    }
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
       {/* Top Navigation */}
@@ -447,6 +714,17 @@ export default function App() {
           lastSavedTime,
           onSaveNow: saveAllNow,
         }}
+        sharedSession={
+          isSharedMode && session
+            ? {
+                email: session.user.email || '',
+                onSignOut: handleSignOut,
+                onOpenTeam: () => setIsTeamModalOpen(true),
+                syncError,
+                isLive,
+              }
+            : undefined
+        }
       />
 
       {/* Main View Area */}
@@ -511,8 +789,9 @@ export default function App() {
             onDeleteVehicle={handleDeleteVehicle}
             onManualSaveDrivers={handleManualSaveDrivers}
             onManualSaveVehicles={handleManualSaveVehicles}
-            onResetDrivers={handleResetDriversToDefault}
-            onResetVehicles={handleResetVehiclesToDefault}
+            // Repor os dados de exemplo não faz sentido (e seria perigoso) na base partilhada
+            onResetDrivers={isSharedMode ? undefined : handleResetDriversToDefault}
+            onResetVehicles={isSharedMode ? undefined : handleResetVehiclesToDefault}
             onOpenBackupModal={() => setIsBackupModalOpen(true)}
           />
         )}
@@ -540,6 +819,14 @@ export default function App() {
         settlements={settlements}
         onRestoreBackup={handleRestoreBackup}
       />
+
+      {isSharedMode && session && (
+        <TeamAccessModal
+          isOpen={isTeamModalOpen}
+          onClose={() => setIsTeamModalOpen(false)}
+          currentEmail={session.user.email || ''}
+        />
+      )}
 
       {/* Footer */}
       <footer className="bg-white border-t border-slate-200 py-4 mt-auto">
