@@ -8,6 +8,9 @@
  *      30 min antes nos restantes períodos, fins de semana e feriados.
  *  • Transfer de saída, com recolha numa morada em Lisboa:
  *      1h30 antes em hora de ponta; 1h00 nos restantes períodos, fins de semana e feriados.
+ *  • Serviços que NÃO são transfers (tours, disposições…) seguem a mesma regra
+ *    conforme o local de início: Aeroporto de Lisboa → como chegada;
+ *    morada na cidade de Lisboa → como saída (complemento de 02/10/2026).
  *  • Qualquer outro primeiro serviço: assinalado para inserir o início manualmente.
  * Um início inserido manualmente (exceção) prevalece sempre sobre o calculado.
  *
@@ -179,9 +182,17 @@ export function computeShiftStart(first: TransportService): StartRuleResult {
   const origin = originText(first);
   const destination = destinationText(first);
   const isTransfer = first.type === 'TRANSFER';
+  const TYPE_LABEL: Record<string, string> = {
+    TOUR_MEIO_DIA: 'Tour de meio dia',
+    TOUR_DIA_INTEIRO: 'Tour de dia inteiro',
+    DISPOSICAO: 'Disposição',
+  };
+  const what = isTransfer ? '' : `${TYPE_LABEL[first.type] || 'Serviço'} (tratado como transfer) — `;
+  const leadLabel = (lead: number) =>
+    lead >= 60 ? `${Math.floor(lead / 60)}h${lead % 60 ? String(lead % 60).padStart(2, '0') : ''}` : `${lead} min`;
 
-  const isArrival =
-    isTransfer && isLisbonAirport(origin) && first.transferDirection !== 'SAIDA';
+  // Começa no Aeroporto de Lisboa → regra da chegada (transfers e, por extensão, outros serviços)
+  const isArrival = isLisbonAirport(origin) && !(isTransfer && first.transferDirection === 'SAIDA');
   if (isArrival) {
     const lead = peak ? SHIFT_RULES_CONFIG.arrivalAirport.peakMinutes : SHIFT_RULES_CONFIG.arrivalAirport.offPeakMinutes;
     return {
@@ -190,11 +201,13 @@ export function computeShiftStart(first: TransportService): StartRuleResult {
       dayKind,
       leadMinutes: lead,
       calculatedStart: minusMinutes(first.scheduledStart, lead),
-      explanation: `Chegada no Aeroporto de Lisboa às ${time}, ${periodLabel}: −${lead} min`,
+      explanation: `${what}Início no Aeroporto de Lisboa às ${time}, ${periodLabel}: −${leadLabel(lead)}`,
     };
   }
 
-  const isDeparture = isTransfer && isAirport(destination) && isLisbonAddress(origin);
+  // Começa numa morada em Lisboa → regra da saída.
+  // Transfers: só quando o destino é um aeroporto. Outros serviços: basta começar em Lisboa.
+  const isDeparture = isLisbonAddress(origin) && (isTransfer ? isAirport(destination) : true);
   if (isDeparture) {
     const lead = peak ? SHIFT_RULES_CONFIG.departureLisbon.peakMinutes : SHIFT_RULES_CONFIG.departureLisbon.offPeakMinutes;
     return {
@@ -203,14 +216,17 @@ export function computeShiftStart(first: TransportService): StartRuleResult {
       dayKind,
       leadMinutes: lead,
       calculatedStart: minusMinutes(first.scheduledStart, lead),
-      explanation: `Saída de morada em Lisboa às ${time}, ${periodLabel}: −${lead >= 60 ? `${Math.floor(lead / 60)}h${lead % 60 ? String(lead % 60).padStart(2, '0') : ''}` : `${lead} min`}`,
+      explanation: `${what}Início em morada de Lisboa às ${time}, ${periodLabel}: −${leadLabel(lead)}`,
     };
   }
 
-  let why = 'o primeiro serviço não é uma chegada ao Aeroporto de Lisboa nem uma saída de morada em Lisboa';
-  if (!isTransfer) why = 'o primeiro serviço não é um transfer';
-  else if (isAirport(origin) && !isLisbonAirport(origin)) why = 'chegada num aeroporto que não é o de Lisboa';
-  else if (isAirport(destination) && !isLisbonAddress(origin)) why = 'saída com recolha fora de Lisboa (ou morada sem código postal)';
+  let why = 'o primeiro serviço não começa no Aeroporto de Lisboa nem numa morada em Lisboa';
+  if (isAirport(origin) && !isLisbonAirport(origin)) why = 'começa num aeroporto que não é o de Lisboa';
+  else if (isTransfer && isLisbonAddress(origin)) why = 'transfer com início em Lisboa mas sem destino aeroporto';
+  else if (!origin.trim()) why = 'o primeiro serviço não tem local de início';
+  else if (!/\b\d{4}-\d{3}\b/.test(origin) && !/\blisboa\b|\blisbon\b/i.test(origin))
+    why = 'local de início sem código postal (reimporte a Agenda ou insira à mão)';
+  else why = 'começa fora da cidade de Lisboa';
   return { kind: 'MANUAL', peak, dayKind, explanation: `Inserir manualmente: ${why}` };
 }
 
