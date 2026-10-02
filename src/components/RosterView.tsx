@@ -28,6 +28,7 @@ import {
 } from 'recharts';
 import { Driver, ShiftScaleConfig, DayOffRecord } from '../types';
 import { getDriverDayStatus } from '../utils/rulesEngine';
+import { getTodayStr, addDays, getMondayOf, getIsoWeekNumber, formatDayMonthShort } from '../utils/dates';
 
 interface RosterViewProps {
   drivers: Driver[];
@@ -41,53 +42,28 @@ export interface WeekOption {
   id: string;
   label: string;
   subLabel: string;
-  startDate: string; // '2026-09-07' (Segunda)
-  endDate: string; // '2026-09-13' (Domingo)
-  startDayNum: number;
+  startDate: string; // Segunda-feira (AAAA-MM-DD)
+  endDate: string; // Domingo (AAAA-MM-DD)
 }
 
-const AVAILABLE_WEEKS: WeekOption[] = [
-  {
-    id: 'week-36',
-    label: 'Semana 36',
-    subLabel: '31 Ago – 06 Set 2026',
-    startDate: '2026-08-31',
-    endDate: '2026-09-06',
-    startDayNum: 1,
-  },
-  {
-    id: 'week-37',
-    label: 'Semana 37 (Atual)',
-    subLabel: '07 Set – 13 Set 2026',
-    startDate: '2026-09-07',
-    endDate: '2026-09-13',
-    startDayNum: 7,
-  },
-  {
-    id: 'week-38',
-    label: 'Semana 38',
-    subLabel: '14 Set – 20 Set 2026',
-    startDate: '2026-09-14',
-    endDate: '2026-09-20',
-    startDayNum: 14,
-  },
-  {
-    id: 'week-39',
-    label: 'Semana 39',
-    subLabel: '21 Set – 27 Set 2026',
-    startDate: '2026-09-21',
-    endDate: '2026-09-27',
-    startDayNum: 21,
-  },
-  {
-    id: 'week-40',
-    label: 'Semana 40',
-    subLabel: '28 Set – 04 Out 2026',
-    startDate: '2026-09-28',
-    endDate: '2026-10-04',
-    startDayNum: 28,
-  },
-];
+/** Semanas disponíveis no gráfico: 8 semanas para trás e 12 para a frente da semana atual. */
+function buildWeekOptions(todayStr: string, weeksBefore = 8, weeksAfter = 12): WeekOption[] {
+  const currentMonday = getMondayOf(todayStr);
+  const weeks: WeekOption[] = [];
+  for (let i = -weeksBefore; i <= weeksAfter; i++) {
+    const startDate = addDays(currentMonday, i * 7);
+    const endDate = addDays(startDate, 6);
+    const weekNum = getIsoWeekNumber(startDate);
+    weeks.push({
+      id: `week-${startDate}`,
+      label: `Semana ${weekNum}${i === 0 ? ' (Atual)' : ''}`,
+      subLabel: `${formatDayMonthShort(startDate)} – ${formatDayMonthShort(endDate)} ${endDate.slice(0, 4)}`,
+      startDate,
+      endDate,
+    });
+  }
+  return weeks;
+}
 
 export const RosterView: React.FC<RosterViewProps> = ({
   drivers,
@@ -99,18 +75,19 @@ export const RosterView: React.FC<RosterViewProps> = ({
   // Only salaried drivers have rotating day-offs with IHT
   const salariedDrivers = drivers.filter(d => d.regime === 'ASSALARIADO');
 
-  // Days to show: 15 days window centered on Sep 11-25, 2026
-  const baseYear = 2026;
-  const baseMonth = 9; // September
-  const [startDay, setStartDay] = useState(8); // Showing from Sep 8 to Sep 22
+  // Data real de hoje (Lisboa) — base de todo o mapa de escalas
+  const todayStr = getTodayStr();
+  const AVAILABLE_WEEKS = useMemo(() => buildWeekOptions(todayStr), [todayStr]);
+
+  // Calendário detalhado: 15 dias a começar na segunda-feira da semana anterior
   const daysCount = 15;
+  const [gridStart, setGridStart] = useState<string>(() => addDays(getMondayOf(todayStr), -7));
 
   const dateList: string[] = [];
   for (let i = 0; i < daysCount; i++) {
-    const day = startDay + i;
-    const formattedDay = String(day).padStart(2, '0');
-    dateList.push(`2026-09-${formattedDay}`);
+    dateList.push(addDays(gridStart, i));
   }
+  const gridEnd = dateList[dateList.length - 1];
 
   // Selected driver for detail inspector
   const [selectedDriverId, setSelectedDriverId] = useState<string>(
@@ -120,12 +97,15 @@ export const RosterView: React.FC<RosterViewProps> = ({
   const selectedDriver = salariedDrivers.find(d => d.id === selectedDriverId);
   const selectedScale = shiftScales.find(s => s.driverId === selectedDriverId);
 
-  // Selected week state for the comparative bar chart
-  const [selectedWeekId, setSelectedWeekId] = useState<string>('week-37');
+  // Selected week state for the comparative bar chart (começa na semana atual)
+  const [selectedWeekId, setSelectedWeekId] = useState<string>(`week-${getMondayOf(todayStr)}`);
   const [isChartExpanded, setIsChartExpanded] = useState<boolean>(true);
 
   const currentWeekIndex = AVAILABLE_WEEKS.findIndex(w => w.id === selectedWeekId);
-  const selectedWeek = currentWeekIndex >= 0 ? AVAILABLE_WEEKS[currentWeekIndex] : AVAILABLE_WEEKS[1];
+  const selectedWeek =
+    currentWeekIndex >= 0
+      ? AVAILABLE_WEEKS[currentWeekIndex]
+      : AVAILABLE_WEEKS.find(w => w.label.includes('(Atual)')) || AVAILABLE_WEEKS[0];
 
   const goToPrevWeek = () => {
     if (currentWeekIndex > 0) {
@@ -213,7 +193,7 @@ export const RosterView: React.FC<RosterViewProps> = ({
         dayName: day.dayName,
         dateStr: day.dateStr,
         isWeekend: day.isWeekend,
-        isToday: day.dateStr === '2026-09-12',
+        isToday: day.dateStr === todayStr,
         activeDrivers: activeDriversCount,
         dayOffs: dayOffsCount,
         totalDrivers: totalSalaried,
@@ -362,7 +342,7 @@ export const RosterView: React.FC<RosterViewProps> = ({
             <button
               type="button"
               onClick={() => {
-                setStartDay(selectedWeek.startDayNum);
+                setGridStart(selectedWeek.startDate);
               }}
               className="px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-semibold rounded-xl border border-purple-200 transition-colors flex items-center gap-1.5 cursor-pointer"
               title="Ajustar o calendário detalhado abaixo para iniciar no primeiro dia desta semana"
@@ -647,8 +627,7 @@ export const RosterView: React.FC<RosterViewProps> = ({
       </div>
       <div className="flex items-center justify-between bg-white px-4 py-3 rounded-xl border border-slate-200 shadow-xs text-sm">
         <button
-          onClick={() => setStartDay(Math.max(1, startDay - 7))}
-          disabled={startDay <= 1}
+          onClick={() => setGridStart(addDays(gridStart, -7))}
           className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-40 text-slate-700 flex items-center gap-1 text-xs font-semibold"
         >
           <ChevronLeft className="w-4 h-4" />
@@ -656,12 +635,20 @@ export const RosterView: React.FC<RosterViewProps> = ({
         </button>
 
         <span className="font-bold text-slate-800 text-sm">
-          Setembro 2026: Dia {startDay} a Dia {startDay + daysCount - 1}
+          {formatDayMonthShort(gridStart)} – {formatDayMonthShort(gridEnd)} {gridEnd.slice(0, 4)}
+          {gridStart !== addDays(getMondayOf(todayStr), -7) && (
+            <button
+              type="button"
+              onClick={() => setGridStart(addDays(getMondayOf(todayStr), -7))}
+              className="ml-3 text-xs font-semibold text-blue-600 hover:underline"
+            >
+              Voltar a hoje
+            </button>
+          )}
         </span>
 
         <button
-          onClick={() => setStartDay(Math.min(16, startDay + 7))}
-          disabled={startDay >= 16}
+          onClick={() => setGridStart(addDays(gridStart, 7))}
           className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-40 text-slate-700 flex items-center gap-1 text-xs font-semibold"
         >
           <span>7 Dias Seguintes</span>
@@ -682,7 +669,7 @@ export const RosterView: React.FC<RosterViewProps> = ({
                 const dateObj = new Date(dateStr + 'T00:00:00');
                 const weekDay = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][dateObj.getDay()];
                 const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
-                const isToday = dateStr === '2026-09-12';
+                const isToday = dateStr === todayStr;
 
                 return (
                   <th
@@ -735,7 +722,7 @@ export const RosterView: React.FC<RosterViewProps> = ({
                   {/* Day Cells */}
                   {dateList.map(dateStr => {
                     const status = getDriverDayStatus(driver.id, dateStr, dayOffs, shiftScales);
-                    const isToday = dateStr === '2026-09-12';
+                    const isToday = dateStr === todayStr;
                     const dateObj = new Date(dateStr + 'T00:00:00');
                     const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
 

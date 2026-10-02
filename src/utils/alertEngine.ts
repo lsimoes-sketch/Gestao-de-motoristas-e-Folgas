@@ -7,6 +7,7 @@ import {
   DayOffRecord,
 } from '../types';
 import { getDriverDayStatus, checkDriverQualification, getAllDriverServiceOverlaps } from './rulesEngine';
+import { getTodayStr, getNowLocalStr, addDays, formatDatePt } from './dates';
 
 export type AlertSeverity = 'CRITICAL' | 'WARNING' | 'INFO';
 
@@ -15,7 +16,8 @@ export type AlertType =
   | 'UNASSIGNED_SERVICE'
   | 'MISSING_SHIFT_SCALE'
   | 'CATEGORY_MISMATCH'
-  | 'SERVICE_OVERLAP_CONFLICT';
+  | 'SERVICE_OVERLAP_CONFLICT'
+  | 'STALE_SERVICE_STATUS';
 
 export interface OperationalAlert {
   id: string;
@@ -49,6 +51,7 @@ export interface OperationalAlertsSummary {
   dayOffConflictCount: number;
   serviceOverlapConflictCount: number;
   missingScaleCount: number;
+  staleServiceCount: number;
   hasImmediateActionRequired: boolean;
   urgentCount: number;
   todayCount: number;
@@ -70,21 +73,64 @@ export function getOperationalAlerts(
   vehicles: Vehicle[],
   shiftScales: ShiftScaleConfig[],
   dayOffs: DayOffRecord[],
-  currentDateStr: string = '2026-09-12'
+  currentDateStr: string = getTodayStr(),
+  nowLocalStr: string = currentDateStr === getTodayStr() ? getNowLocalStr() : `${currentDateStr}T00:00`
 ): OperationalAlertsSummary {
   const alerts: OperationalAlert[] = [];
 
   const today = currentDateStr;
-  const tomorrowDate = new Date(currentDateStr + 'T00:00:00');
-  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-  const tomorrow = tomorrowDate.toISOString().split('T')[0];
+  const tomorrow = addDays(currentDateStr, 1);
 
   // 1. Check services for DAY OFF CONFLICTS and QUALIFICATION MISMATCHES
   services.forEach(service => {
+    // Serviços fechados (concluídos ou cancelados) já não geram alertas
+    if (service.status === 'CONCLUIDO' || service.status === 'CANCELADO') return;
+
     const serviceDate = service.scheduledStart.split('T')[0];
     const isToday = serviceDate === today;
     const isTomorrow = serviceDate === tomorrow;
-    const alloc = allocations.find(a => a.serviceId === service.id);
+    const alloc = allocations.find(a => a.serviceId === service.id && a.status !== 'CANCELADO');
+    const assignedDriver = alloc?.driverId ? drivers.find(d => d.id === alloc.driverId) : undefined;
+
+    // 0. Serviço que já terminou mas continua em aberto (estado desatualizado)
+    if (service.scheduledEnd < nowLocalStr) {
+      const endLabel = `${formatDatePt(service.scheduledEnd.split('T')[0])} às ${service.scheduledEnd.split('T')[1]}`;
+      const statusLabel = service.status === 'PENDENTE' ? 'Pendente' : service.status === 'EM_CURSO' ? 'Em curso' : 'Confirmado';
+
+      let nextStep: string;
+      let actionLabel: string;
+      if (!assignedDriver) {
+        nextStep = 'Não tem motorista atribuído: confirme se o serviço foi realizado (e por quem) ou marque-o como cancelado.';
+        actionLabel = 'Rever Serviço';
+      } else if (assignedDriver.regime === 'FREELANCER') {
+        nextStep = `Feche-o com o apuramento do free-lancer ${assignedDriver.name} (horas reais, pacote e refeição).`;
+        actionLabel = 'Apurar e Fechar';
+      } else {
+        nextStep = `Foi atribuído a ${assignedDriver.name}: marque-o como concluído (ou cancelado, se não se realizou).`;
+        actionLabel = 'Marcar Concluído';
+      }
+
+      alerts.push({
+        id: `alert-stale-${service.id}`,
+        type: 'STALE_SERVICE_STATUS',
+        severity: 'WARNING',
+        title: `Serviço Terminado por Fechar: ${service.code}`,
+        description: `O serviço para "${service.clientName}" (${service.origin} → ${service.destination}) terminou a ${endLabel} e continua no estado "${statusLabel}". ${nextStep}`,
+        date: serviceDate,
+        serviceId: service.id,
+        serviceCode: service.code,
+        driverId: assignedDriver?.id,
+        driverName: assignedDriver?.name,
+        isToday: false,
+        isTomorrow: false,
+        suggestedAction: {
+          label: actionLabel,
+          tabTarget: 'services',
+        },
+      });
+      // Um serviço passado só precisa de ser fechado; não faz sentido alertar escala ou folgas
+      return;
+    }
 
     if (alloc && alloc.driverId) {
       const driver = drivers.find(d => d.id === alloc.driverId);
@@ -155,8 +201,7 @@ export function getOperationalAlerts(
     const isUnassigned =
       !alloc ||
       !alloc.driverId ||
-      !alloc.vehicleId ||
-      service.status === 'PENDENTE';
+      !alloc.vehicleId;
 
     if (isUnassigned) {
       const missingParts: string[] = [];
@@ -168,7 +213,7 @@ export function getOperationalAlerts(
         ? 'HOJE'
         : isTomorrow
         ? 'AMANHÃ'
-        : `a ${serviceDate.split('-').reverse().join('/')}`;
+        : `a ${formatDatePt(serviceDate)}`;
 
       const missingText =
         missingParts.length === 2
@@ -225,7 +270,11 @@ export function getOperationalAlerts(
   // de e para o Aeroporto, e a Saída não ultrapassar 30 min para lá da Chegada.
   const overlapReports = getAllDriverServiceOverlaps(services, allocations, drivers);
   overlapReports.forEach(report => {
-    if (!report.isAllowed) {
+    // Sobreposições em serviços já fechados ou passados são histórico, não conflito
+    const involvesClosedOrPast = [report.serviceA, report.serviceB].some(
+      s => s.status === 'CONCLUIDO' || s.status === 'CANCELADO' || s.scheduledEnd < nowLocalStr
+    );
+    if (!report.isAllowed && !involvesClosedOrPast) {
       const isToday = report.date === today;
       const isTomorrow = report.date === tomorrow;
 
@@ -270,6 +319,7 @@ export function getOperationalAlerts(
   const dayOffConflictCount = alerts.filter(a => a.type === 'DAYOFF_SERVICE_CONFLICT').length;
   const serviceOverlapConflictCount = alerts.filter(a => a.type === 'SERVICE_OVERLAP_CONFLICT').length;
   const missingScaleCount = alerts.filter(a => a.type === 'MISSING_SHIFT_SCALE').length;
+  const staleServiceCount = alerts.filter(a => a.type === 'STALE_SERVICE_STATUS').length;
   const urgentCount = alerts.filter(a => a.isToday || a.isTomorrow || a.severity === 'CRITICAL').length;
   const todayCount = alerts.filter(a => a.isToday).length;
   const todayConflictCount = alerts.filter(
@@ -284,6 +334,7 @@ export function getOperationalAlerts(
     dayOffConflictCount,
     serviceOverlapConflictCount,
     missingScaleCount,
+    staleServiceCount,
     hasImmediateActionRequired: criticalCount > 0 || todayCount > 0,
     urgentCount,
     todayCount,

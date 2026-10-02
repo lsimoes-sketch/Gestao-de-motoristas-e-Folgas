@@ -414,7 +414,9 @@ export function exportSettlementsToCSV(
   const rows = settlements.map(st => {
     const alloc = allocations.find(a => a.id === st.allocationId);
     const service = alloc ? services.find(s => s.id === alloc.serviceId) : undefined;
-    const driver = alloc ? drivers.find(d => d.id === alloc.driverId) : undefined;
+    const driver =
+      drivers.find(d => d.id === st.driverId) ||
+      (alloc ? drivers.find(d => d.id === alloc.driverId) : undefined);
 
     const packages = [
       st.package4h > 0 ? `${st.package4h}x 4h` : '',
@@ -426,7 +428,7 @@ export function exportSettlementsToCSV(
     const cells = [
       escapeCSV(st.id, delimiter),
       escapeCSV(st.serviceCode || (service ? service.code : 'N/A'), delimiter),
-      escapeCSV(st.driverName || (driver ? driver.name : 'Free-lancer'), delimiter),
+      escapeCSV(driver ? driver.name : st.driverName || 'Free-lancer', delimiter),
       escapeCSV(driver ? driver.mechanicalNumber : '', delimiter),
       escapeCSV(st.actualStart ? st.actualStart.replace('T', ' ') : '', delimiter),
       escapeCSV(st.actualEnd ? st.actualEnd.replace('T', ' ') : '', delimiter),

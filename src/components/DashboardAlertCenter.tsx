@@ -21,6 +21,9 @@ import {
 } from 'lucide-react';
 import { OperationalAlert, OperationalAlertsSummary, AlertType } from '../utils/alertEngine';
 import { TransportService } from '../types';
+import { getTodayStr, addDays, formatDatePt } from '../utils/dates';
+
+const MONTHS_FULL_PT = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
 interface DashboardAlertCenterProps {
   alertsSummary: OperationalAlertsSummary;
@@ -28,7 +31,7 @@ interface DashboardAlertCenterProps {
   onQuickResolveService?: (service: TransportService) => void;
 }
 
-type AlertFilterCategory = 'ALL' | 'URGENT' | 'CONFLICTS' | 'UNASSIGNED' | 'CONFIG';
+type AlertFilterCategory = 'ALL' | 'URGENT' | 'CONFLICTS' | 'UNASSIGNED' | 'CONFIG' | 'STALE';
 
 export const DashboardAlertCenter: React.FC<DashboardAlertCenterProps> = ({
   alertsSummary,
@@ -39,6 +42,13 @@ export const DashboardAlertCenter: React.FC<DashboardAlertCenterProps> = ({
   const [isExpanded, setIsExpanded] = useState(true);
   const [dismissedAlertIds, setDismissedAlertIds] = useState<string[]>([]);
   const [showDismissed, setShowDismissed] = useState(false);
+
+  // Rótulos de data reais (hoje/amanhã)
+  const todayStr = getTodayStr();
+  const todayShort = formatDatePt(todayStr).slice(0, 5);
+  const tomorrowShort = formatDatePt(addDays(todayStr, 1)).slice(0, 5);
+  const [ty, tm, td] = todayStr.split('-');
+  const todayLong = `${Number(td)} de ${MONTHS_FULL_PT[Number(tm) - 1]} de ${ty}`;
 
   const {
     alerts,
@@ -71,6 +81,7 @@ export const DashboardAlertCenter: React.FC<DashboardAlertCenterProps> = ({
   );
   const activeUnassigned = activeAlerts.filter(a => a.type === 'UNASSIGNED_SERVICE');
   const activeMissingScales = activeAlerts.filter(a => a.type === 'MISSING_SHIFT_SCALE');
+  const activeStale = activeAlerts.filter(a => a.type === 'STALE_SERVICE_STATUS');
   const urgentAlerts = activeAlerts.filter(
     a => a.isToday || a.isTomorrow || a.severity === 'CRITICAL'
   );
@@ -91,6 +102,7 @@ export const DashboardAlertCenter: React.FC<DashboardAlertCenterProps> = ({
       );
     if (filterCategory === 'UNASSIGNED') return alert.type === 'UNASSIGNED_SERVICE';
     if (filterCategory === 'CONFIG') return alert.type === 'MISSING_SHIFT_SCALE';
+    if (filterCategory === 'STALE') return alert.type === 'STALE_SERVICE_STATUS';
     return true;
   });
 
@@ -186,7 +198,7 @@ export const DashboardAlertCenter: React.FC<DashboardAlertCenterProps> = ({
 
               {todayAlerts.length > 0 && (
                 <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-rose-600 text-white shadow-2xs">
-                  {todayAlerts.length} para HOJE (12/09)
+                  {todayAlerts.length} para HOJE ({todayShort})
                 </span>
               )}
 
@@ -364,7 +376,7 @@ export const DashboardAlertCenter: React.FC<DashboardAlertCenterProps> = ({
                     <div>
                       <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
                         <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-rose-600 text-white uppercase tracking-wider">
-                          {urgent.isToday ? 'Urgência Máxima: HOJE (12/09)' : 'Urgência: AMANHÃ (13/09)'}
+                          {urgent.isToday ? `Urgência Máxima: HOJE (${todayShort})` : `Urgência: AMANHÃ (${tomorrowShort})`}
                         </span>
                         {urgent.serviceCode && (
                           <span className="text-[11px] font-mono font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
@@ -470,6 +482,21 @@ export const DashboardAlertCenter: React.FC<DashboardAlertCenterProps> = ({
                 <span>Lacunas de Escala ({activeUnassigned.length})</span>
               </button>
 
+              {activeStale.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setFilterCategory('STALE')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    filterCategory === 'STALE'
+                      ? 'bg-orange-600 text-white shadow-2xs'
+                      : 'bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200'
+                  }`}
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>Por Fechar ({activeStale.length})</span>
+                </button>
+              )}
+
               {missingScaleCount > 0 && (
                 <button
                   type="button"
@@ -488,7 +515,7 @@ export const DashboardAlertCenter: React.FC<DashboardAlertCenterProps> = ({
 
             <div className="text-[11px] text-slate-500 font-medium self-end sm:self-auto flex items-center gap-1">
               <Clock className="w-3 h-3 text-slate-400" />
-              <span>Referência: 12 de Setembro de 2026</span>
+              <span>Referência: {todayLong}</span>
             </div>
           </div>
 
@@ -508,6 +535,7 @@ export const DashboardAlertCenter: React.FC<DashboardAlertCenterProps> = ({
                 const isUnassigned = alert.type === 'UNASSIGNED_SERVICE';
                 const isMissingScale = alert.type === 'MISSING_SHIFT_SCALE';
                 const isCategoryMismatch = alert.type === 'CATEGORY_MISMATCH';
+                const isStale = alert.type === 'STALE_SERVICE_STATUS';
 
                 return (
                   <div
@@ -523,6 +551,8 @@ export const DashboardAlertCenter: React.FC<DashboardAlertCenterProps> = ({
                         ? alert.isToday
                           ? 'bg-amber-50/70 border-amber-300 hover:border-amber-400 shadow-2xs ring-1 ring-amber-300/40'
                           : 'bg-amber-50/40 border-amber-200 hover:border-amber-300'
+                        : isStale
+                        ? 'bg-orange-50/40 border-orange-200 hover:border-orange-300'
                         : 'bg-purple-50/50 border-purple-200 hover:border-purple-300'
                     }`}
                   >
@@ -565,6 +595,13 @@ export const DashboardAlertCenter: React.FC<DashboardAlertCenterProps> = ({
                             </span>
                           )}
 
+                          {isStale && (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-md bg-orange-600 text-white shadow-2xs">
+                              <Clock className="w-3 h-3" />
+                              SERVIÇO TERMINADO POR FECHAR
+                            </span>
+                          )}
+
                           {isMissingScale && (
                             <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-md bg-purple-700 text-white shadow-2xs">
                               <CalendarPlus className="w-3 h-3" />
@@ -575,13 +612,13 @@ export const DashboardAlertCenter: React.FC<DashboardAlertCenterProps> = ({
                           {/* Urgency Timing Badges */}
                           {alert.isToday && (
                             <span className="text-[11px] font-extrabold px-2.5 py-0.5 rounded-md bg-rose-100 text-rose-800 border border-rose-300 animate-pulse">
-                              HOJE (12/09)
+                              HOJE ({todayShort})
                             </span>
                           )}
 
                           {alert.isTomorrow && (
                             <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-300">
-                              AMANHÃ (13/09)
+                              AMANHÃ ({tomorrowShort})
                             </span>
                           )}
 

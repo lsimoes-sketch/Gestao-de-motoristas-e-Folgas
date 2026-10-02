@@ -13,18 +13,33 @@ import {
   Edit3,
   Bot,
 } from 'lucide-react';
-import { ContractedPackage, FreelancerSettlement } from '../types';
+import { ContractedPackage, FreelancerSettlement, Driver, TransportService } from '../types';
 import { calculateFreelancerService, DEFAULT_PRICING } from '../utils/rulesEngine';
+import { getTodayStr } from '../utils/dates';
 
 interface FreelancerCalcViewProps {
   settlements: FreelancerSettlement[];
+  drivers?: Driver[];
+  services?: TransportService[];
 }
 
-export const FreelancerCalcView: React.FC<FreelancerCalcViewProps> = ({ settlements }) => {
-  // Simulator inputs
-  const [startDate, setStartDate] = useState('2026-09-12');
+export const FreelancerCalcView: React.FC<FreelancerCalcViewProps> = ({
+  settlements,
+  drivers = [],
+  services,
+}) => {
+  // O nome mostrado vem sempre da ficha atual do motorista (driverId);
+  // o nome guardado na liquidação é só um recurso se o motorista já não existir.
+  const getSettlementDriverName = (item: FreelancerSettlement) =>
+    drivers.find(d => d.id === item.driverId)?.name || item.driverName || 'Motorista removido';
+  const hasMatchingService = (item: FreelancerSettlement) =>
+    !services || services.some(s => s.code === item.serviceCode);
+
+  // Simulator inputs (data por defeito: hoje)
+  const todayStr = getTodayStr();
+  const [startDate, setStartDate] = useState(todayStr);
   const [startTime, setStartTime] = useState('18:00');
-  const [endDate, setEndDate] = useState('2026-09-12');
+  const [endDate, setEndDate] = useState(todayStr);
   const [endTime, setEndTime] = useState('22:00');
   const [contractedPackage, setContractedPackage] = useState<ContractedPackage>('AUTO_MELHOR_TARIFA');
 
@@ -56,49 +71,49 @@ export const FreelancerCalcView: React.FC<FreelancerCalcViewProps> = ({ settleme
   const loadScenario = (scenario: number) => {
     if (scenario === 1) {
       // Exemplo do Cliente: 5h30 de Serviço -> Pacote 4h + 2h Extra (Regra de transição às 6h)
-      setStartDate('2026-09-12');
+      setStartDate(todayStr);
       setStartTime('08:30');
-      setEndDate('2026-09-12');
+      setEndDate(todayStr);
       setEndTime('14:00'); // 5h30m
       setContractedPackage('AUTO_MELHOR_TARIFA');
       setIsManualMeal(false);
     } else if (scenario === 2) {
       // Exemplo do Cliente: 6h30 de Serviço -> Transição para Pacote de 8h
-      setStartDate('2026-09-12');
+      setStartDate(todayStr);
       setStartTime('08:00');
-      setEndDate('2026-09-12');
+      setEndDate(todayStr);
       setEndTime('14:30'); // 6h30m -> Ultrapassa 6h -> Transita p/ Pacote 8h
       setContractedPackage('AUTO_MELHOR_TARIFA');
       setIsManualMeal(false);
     } else if (scenario === 3) {
       // Exemplo do Cliente: 19h30 às 20h15 (45 min) -> NÃO confere refeição
-      setStartDate('2026-09-12');
+      setStartDate(todayStr);
       setStartTime('19:30');
-      setEndDate('2026-09-12');
+      setEndDate(todayStr);
       setEndTime('20:15');
       setContractedPackage('AUTO_MELHOR_TARIFA');
       setIsManualMeal(false);
     } else if (scenario === 4) {
       // Exemplo do Cliente: 18h00 às 22h00 (4h) -> CONFERE refeição (+15€)
-      setStartDate('2026-09-12');
+      setStartDate(todayStr);
       setStartTime('18:00');
-      setEndDate('2026-09-12');
+      setEndDate(todayStr);
       setEndTime('22:00');
       setContractedPackage('AUTO_MELHOR_TARIFA');
       setIsManualMeal(false);
     } else if (scenario === 5) {
       // Tour com atraso até às 20h45 -> 1x 8h + 4h extra + REFEIÇÃO SIM
-      setStartDate('2026-09-12');
+      setStartDate(todayStr);
       setStartTime('09:00');
-      setEndDate('2026-09-12');
+      setEndDate(todayStr);
       setEndTime('20:45');
       setContractedPackage('PACOTE_8H');
       setIsManualMeal(false);
     } else if (scenario === 6) {
       // Inserção Manual pelo Operador
-      setStartDate('2026-09-12');
+      setStartDate(todayStr);
       setStartTime('17:00');
-      setEndDate('2026-09-12');
+      setEndDate(todayStr);
       setEndTime('20:30');
       setContractedPackage('AUTO_MELHOR_TARIFA');
       setIsManualMeal(true);
@@ -546,8 +561,25 @@ export const FreelancerCalcView: React.FC<FreelancerCalcViewProps> = ({ settleme
             <tbody className="divide-y divide-slate-100">
               {settlements.map(item => (
                 <tr key={item.id} className="hover:bg-slate-50">
-                  <td className="py-3 px-4 font-mono font-bold text-slate-900">{item.serviceCode}</td>
-                  <td className="py-3 px-4 font-semibold text-slate-800">{item.driverName}</td>
+                  <td className="py-3 px-4 font-mono font-bold text-slate-900">
+                    {item.serviceCode}
+                    {!hasMatchingService(item) && (
+                      <div
+                        className="mt-0.5 font-sans text-[10px] font-semibold text-amber-700"
+                        title="Não existe nenhum serviço com este código no sistema (pode ser um registo de exemplo)"
+                      >
+                        Serviço não encontrado
+                      </div>
+                    )}
+                  </td>
+                  <td className="py-3 px-4 font-semibold text-slate-800">
+                    {getSettlementDriverName(item)}
+                    {item.driverName && item.driverName !== getSettlementDriverName(item) && (
+                      <div className="text-[10px] font-normal text-slate-400" title="Nome guardado no momento do fecho">
+                        registado como {item.driverName}
+                      </div>
+                    )}
+                  </td>
                   <td className="py-3 px-4 text-slate-600 font-mono">
                     {item.actualStart.split('T')[1]} - {item.actualEnd.split('T')[1]}
                   </td>

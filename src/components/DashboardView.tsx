@@ -25,6 +25,9 @@ import {
 } from '../types';
 import { getDriverDayStatus, checkDriverQualification } from '../utils/rulesEngine';
 import { getOperationalAlerts } from '../utils/alertEngine';
+import { getTodayStr, formatDatePt } from '../utils/dates';
+
+const MONTHS_FULL_PT = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 import { DashboardAlertCenter } from './DashboardAlertCenter';
 import { QuickAllocationModal } from './QuickAllocationModal';
 import { DashboardCharts } from './DashboardCharts';
@@ -56,7 +59,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenBackupModal,
   onSaveAllocation,
 }) => {
-  const currentDateStr = '2026-09-12';
+  const currentDateStr = getTodayStr();
+  const [cy, cm, cd] = currentDateStr.split('-');
+  const todayLong = `${Number(cd)} de ${MONTHS_FULL_PT[Number(cm) - 1]} de ${cy}`;
 
   const [serviceToResolve, setServiceToResolve] = useState<TransportService | null>(null);
 
@@ -108,7 +113,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="flex items-center gap-2 text-blue-400 text-xs font-semibold uppercase tracking-wider mb-1">
             <span>Painel Operacional</span>
             <span>•</span>
-            <span>Data de Hoje: 12 de Setembro de 2026</span>
+            <span>Data de Hoje: {todayLong}</span>
           </div>
           <h1 className="text-2xl font-bold tracking-tight">
             Controlo de Escalas, Folgas & Apuramento de Serviços
@@ -213,7 +218,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Serviços Hoje (12/09)
+              Serviços Hoje ({formatDatePt(currentDateStr).slice(0, 5)})
             </span>
             <div
               className={`w-9 h-9 rounded-lg flex items-center justify-center ${

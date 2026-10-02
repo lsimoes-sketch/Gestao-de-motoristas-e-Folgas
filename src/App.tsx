@@ -10,6 +10,7 @@ import { NewServiceModal } from './components/NewServiceModal';
 import { SystemBackupModal } from './components/SystemBackupModal';
 import { SystemBackupData } from './utils/systemBackup';
 import { getOperationalAlerts } from './utils/alertEngine';
+import { getTodayStr, getNowLocalStr } from './utils/dates';
 import {
   STORAGE_KEYS,
   loadFromStorage,
@@ -256,13 +257,32 @@ export default function App() {
   const handleCompleteServiceAndSettle = (settlement: FreelancerSettlement) => {
     setSettlements(prev => [settlement, ...prev]);
 
-    // Find service and update status to CONCLUIDO
+    // Find service and update status to CONCLUIDO (serviço e alocação)
     const alloc = allocations.find(a => a.id === settlement.allocationId);
     if (alloc) {
       setServices(prev =>
         prev.map(s => (s.id === alloc.serviceId ? { ...s, status: 'CONCLUIDO' } : s))
       );
+      setAllocations(prev =>
+        prev.map(a => (a.id === alloc.id ? { ...a, status: 'CONCLUIDO' } : a))
+      );
     }
+  };
+
+  /**
+   * Fecha um ou mais serviços (concluído ou cancelado), mantendo a alocação coerente.
+   * Usado para serviços que já terminaram mas ficaram com estado desatualizado.
+   */
+  const handleSetServicesStatus = (
+    serviceIds: string[],
+    status: 'CONCLUIDO' | 'CANCELADO'
+  ) => {
+    if (serviceIds.length === 0) return;
+    const ids = new Set(serviceIds);
+    setServices(prev => prev.map(s => (ids.has(s.id) ? { ...s, status } : s)));
+    setAllocations(prev =>
+      prev.map(a => (ids.has(a.serviceId) ? { ...a, status } : a))
+    );
   };
 
   const handleAddDriver = (newDriver: Driver) => {
@@ -397,12 +417,18 @@ export default function App() {
     vehicles,
     shiftScales,
     dayOffs,
-    '2026-09-12'
+    getTodayStr(),
+    getNowLocalStr()
   );
 
-  // Count services waiting for allocation
+  // Count services waiting for allocation (apenas serviços em aberto que ainda não terminaram)
+  const nowLocal = getNowLocalStr();
   const pendingCount = services.filter(
-    s => !allocations.some(a => a.serviceId === s.id)
+    s =>
+      s.status !== 'CONCLUIDO' &&
+      s.status !== 'CANCELADO' &&
+      s.scheduledEnd >= nowLocal &&
+      !allocations.some(a => a.serviceId === s.id && a.status !== 'CANCELADO')
   ).length;
 
   return (
@@ -451,6 +477,7 @@ export default function App() {
             dayOffs={dayOffs}
             onSaveAllocation={handleSaveAllocation}
             onCompleteServiceAndSettle={handleCompleteServiceAndSettle}
+            onSetServicesStatus={handleSetServicesStatus}
             onOpenNewServiceModal={() => setIsNewServiceModalOpen(true)}
             onBatchAddServices={handleBatchAddServices}
             onOpenBackupModal={() => setIsBackupModalOpen(true)}
@@ -468,7 +495,7 @@ export default function App() {
         )}
 
         {activeTab === 'freelancer-calc' && (
-          <FreelancerCalcView settlements={settlements} />
+          <FreelancerCalcView settlements={settlements} drivers={drivers} services={services} />
         )}
 
         {activeTab === 'drivers-fleet' && (

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { TransportService, ServiceType, VehicleCategory, AirportTransferDirection } from '../types';
+import { getTodayStr } from '../utils/dates';
 
 interface NewServiceModalProps {
   isOpen: boolean;
@@ -18,7 +19,7 @@ export const NewServiceModal: React.FC<NewServiceModalProps> = ({
   const [transferDirection, setTransferDirection] = useState<AirportTransferDirection | undefined>(undefined);
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
-  const [date, setDate] = useState('2026-09-12');
+  const [date, setDate] = useState(() => getTodayStr());
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('13:00');
   const [passengers, setPassengers] = useState(4);

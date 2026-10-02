@@ -37,6 +37,7 @@ import {
   DEFAULT_PRICING,
 } from '../utils/rulesEngine';
 import { ExportServicesModal } from './ExportServicesModal';
+import { getNowLocalStr } from '../utils/dates';
 import { ImportServicesModal } from './ImportServicesModal';
 
 interface ServicesViewProps {
@@ -48,6 +49,7 @@ interface ServicesViewProps {
   dayOffs: DayOffRecord[];
   onSaveAllocation: (allocation: Allocation) => void;
   onCompleteServiceAndSettle: (settlement: FreelancerSettlement) => void;
+  onSetServicesStatus?: (serviceIds: string[], status: 'CONCLUIDO' | 'CANCELADO') => void;
   onOpenNewServiceModal: () => void;
   onBatchAddServices?: (newServices: TransportService[]) => void;
   onOpenBackupModal?: () => void;
@@ -62,6 +64,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
   dayOffs,
   onSaveAllocation,
   onCompleteServiceAndSettle,
+  onSetServicesStatus,
   onOpenNewServiceModal,
   onBatchAddServices,
   onOpenBackupModal,
@@ -87,6 +90,53 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
   const [settleMealMode, setSettleMealMode] = useState<'AUTO' | 'MANUAL'>('AUTO');
   const [settleMealGranted, setSettleMealGranted] = useState<boolean>(false);
   const [settleMealReason, setSettleMealReason] = useState<string>('');
+
+  // Serviços que já terminaram mas continuam em aberto (estado desatualizado)
+  const [showOnlyStale, setShowOnlyStale] = useState(false);
+  const nowLocal = getNowLocalStr();
+  const isOpenStatus = (s: TransportService) => s.status !== 'CONCLUIDO' && s.status !== 'CANCELADO';
+  const isStale = (s: TransportService) => isOpenStatus(s) && s.scheduledEnd < nowLocal;
+  const getActiveAlloc = (serviceId: string) =>
+    allocations.find(a => a.serviceId === serviceId && a.status !== 'CANCELADO');
+
+  const staleServices = services.filter(isStale);
+  // Podem ser concluídos de uma vez: com motorista assalariado e viatura atribuídos
+  const staleSalariedIds = staleServices
+    .filter(s => {
+      const alloc = getActiveAlloc(s.id);
+      const drv = alloc ? drivers.find(d => d.id === alloc.driverId) : undefined;
+      return !!alloc?.vehicleId && drv?.regime === 'ASSALARIADO';
+    })
+    .map(s => s.id);
+  const staleFreelancerCount = staleServices.filter(s => {
+    const alloc = getActiveAlloc(s.id);
+    const drv = alloc ? drivers.find(d => d.id === alloc.driverId) : undefined;
+    return drv?.regime === 'FREELANCER';
+  }).length;
+  const staleUnassignedCount = staleServices.length - staleSalariedIds.length - staleFreelancerCount;
+
+  const visibleServices = showOnlyStale ? staleServices : services;
+
+  const handleCompleteService = (service: TransportService) => {
+    onSetServicesStatus?.([service.id], 'CONCLUIDO');
+  };
+
+  const handleCancelService = (service: TransportService) => {
+    if (window.confirm(`Marcar o serviço ${service.code} (${service.clientName}) como CANCELADO?`)) {
+      onSetServicesStatus?.([service.id], 'CANCELADO');
+    }
+  };
+
+  const handleBulkCompleteSalaried = () => {
+    if (staleSalariedIds.length === 0) return;
+    if (
+      window.confirm(
+        `Marcar como CONCLUÍDOS os ${staleSalariedIds.length} serviço(s) já terminados com motorista assalariado atribuído?`
+      )
+    ) {
+      onSetServicesStatus?.(staleSalariedIds, 'CONCLUIDO');
+    }
+  };
 
   const openAllocationModal = (service: TransportService) => {
     const existingAlloc = allocations.find(a => a.serviceId === service.id);
@@ -209,6 +259,50 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
         </div>
       </div>
 
+      {/* Aviso: serviços terminados por fechar */}
+      {staleServices.length > 0 && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-bold text-amber-950">
+                {staleServices.length === 1
+                  ? '1 serviço já terminou e continua em aberto'
+                  : `${staleServices.length} serviços já terminaram e continuam em aberto`}
+              </p>
+              <p className="text-xs text-amber-900/80 mt-0.5">
+                {[
+                  staleSalariedIds.length > 0 && `${staleSalariedIds.length} com motorista assalariado (podem ser concluídos)`,
+                  staleFreelancerCount > 0 && `${staleFreelancerCount} com free-lancer (fechar pelo apuramento FL)`,
+                  staleUnassignedCount > 0 && `${staleUnassignedCount} sem motorista (confirmar ou cancelar)`,
+                ]
+                  .filter(Boolean)
+                  .join(' • ')}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowOnlyStale(!showOnlyStale)}
+              className="px-3 py-1.5 bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-xs font-bold transition-colors"
+            >
+              {showOnlyStale ? 'Ver todos os serviços' : 'Ver só os por fechar'}
+            </button>
+            {onSetServicesStatus && staleSalariedIds.length > 0 && (
+              <button
+                type="button"
+                onClick={handleBulkCompleteSalaried}
+                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                Concluir {staleSalariedIds.length} de assalariados
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Services List Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
@@ -225,8 +319,10 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {services.map(service => {
-                const alloc = allocations.find(a => a.serviceId === service.id);
+              {visibleServices.map(service => {
+                const alloc = getActiveAlloc(service.id);
+                const serviceIsStale = isStale(service);
+                const serviceIsOpen = isOpenStatus(service);
                 const driver = alloc ? drivers.find(d => d.id === alloc.driverId) : null;
                 const vehicle = alloc ? vehicles.find(v => v.id === alloc.vehicleId) : null;
 
@@ -372,29 +468,66 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                             ? 'bg-emerald-100 text-emerald-800'
                             : service.status === 'CONCLUIDO'
                             ? 'bg-slate-100 text-slate-700'
+                            : service.status === 'CANCELADO'
+                            ? 'bg-rose-50 text-rose-700 line-through'
                             : 'bg-amber-100 text-amber-800'
                         }`}
                       >
                         {service.status}
                       </span>
+                      {serviceIsStale && (
+                        <div
+                          className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-300"
+                          title="O serviço já terminou mas o estado não foi atualizado"
+                        >
+                          <Clock className="w-3 h-3" />
+                          POR FECHAR
+                        </div>
+                      )}
                     </td>
 
                     {/* Ações */}
-                    <td className="py-4 px-4 text-right space-x-2">
-                      <button
-                        onClick={() => openAllocationModal(service)}
-                        className="px-2.5 py-1 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md transition-colors"
-                      >
-                        {driver ? 'Alterar' : 'Alocar'}
-                      </button>
+                    <td className="py-4 px-4 text-right">
+                      {serviceIsOpen ? (
+                        <div className="flex flex-wrap justify-end gap-1.5">
+                          <button
+                            onClick={() => openAllocationModal(service)}
+                            className="px-2.5 py-1 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md transition-colors"
+                          >
+                            {driver ? 'Alterar' : 'Alocar'}
+                          </button>
 
-                      {driver && driver.regime === 'FREELANCER' && (
-                        <button
-                          onClick={() => openSettlementModal(service)}
-                          className="px-2.5 py-1 text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-md transition-colors"
-                        >
-                          Apurar FL
-                        </button>
+                          {driver && driver.regime === 'FREELANCER' && (
+                            <button
+                              onClick={() => openSettlementModal(service)}
+                              className="px-2.5 py-1 text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-md transition-colors"
+                            >
+                              Apurar FL
+                            </button>
+                          )}
+
+                          {onSetServicesStatus && serviceIsStale && driver && vehicle && driver.regime === 'ASSALARIADO' && (
+                            <button
+                              onClick={() => handleCompleteService(service)}
+                              className="px-2.5 py-1 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-md transition-colors"
+                              title="Marcar o serviço como concluído"
+                            >
+                              Concluir
+                            </button>
+                          )}
+
+                          {onSetServicesStatus && (
+                            <button
+                              onClick={() => handleCancelService(service)}
+                              className="px-2.5 py-1 text-xs font-semibold bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 rounded-md transition-colors"
+                              title="Marcar o serviço como cancelado"
+                            >
+                              Cancelar
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-slate-400 font-medium">Fechado</span>
                       )}
                     </td>
                   </tr>
