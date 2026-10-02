@@ -1,0 +1,6 @@
+{
+  "name": "Gestão de Motoristas e Folgas",
+  "description": "Sistema de gestão de horários, folgas rotativas de assalariados e cálculo de serviços para free-lancers em empresas de transporte.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
