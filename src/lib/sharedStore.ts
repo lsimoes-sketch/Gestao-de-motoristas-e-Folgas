@@ -21,6 +21,7 @@ export const COLLECTION_TABLES: Record<CollectionKey, string> = {
   shiftScales: 'shift_scales',
   dayOffs: 'day_offs',
   settlements: 'settlements',
+  workDays: 'work_days',
 };
 
 export const COLLECTION_KEYS = Object.keys(COLLECTION_TABLES) as CollectionKey[];

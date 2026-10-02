@@ -33,6 +33,8 @@ import {
 import { LoginScreen } from './components/LoginScreen';
 import { TeamAccessModal } from './components/TeamAccessModal';
 import { ImportAgendaModal } from './components/ImportAgendaModal';
+import { ShiftsView } from './components/ShiftsView';
+import { getDayShifts, workDayId } from './utils/shiftRules';
 import type { AgendaImportResult } from './utils/agendaImport';
 import { Loader2, ShieldX } from 'lucide-react';
 import {
@@ -52,6 +54,7 @@ import {
   ShiftScaleConfig,
   DayOffRecord,
   FreelancerSettlement,
+  WorkDayRecord,
 } from './types';
 
 // Com a base partilhada ativa, nada é guardado no browser
@@ -105,6 +108,9 @@ export default function App() {
   const [settlements, setSettlements] = useState<FreelancerSettlement[]>(() =>
     initialState<FreelancerSettlement>(STORAGE_KEYS.SETTLEMENTS, INITIAL_SETTLEMENTS)
   );
+  const [workDays, setWorkDays] = useState<WorkDayRecord[]>(() =>
+    initialState<WorkDayRecord>(STORAGE_KEYS.WORK_DAYS, [])
+  );
 
   // =========================================================================
   // Periodic Debounced Auto-Save Engine (30-second interval / debounce)
@@ -138,6 +144,7 @@ export default function App() {
     shiftScales,
     dayOffs,
     settlements,
+    workDays,
   });
 
   useEffect(() => {
@@ -149,8 +156,9 @@ export default function App() {
       shiftScales,
       dayOffs,
       settlements,
+      workDays,
     };
-  }, [drivers, vehicles, services, allocations, shiftScales, dayOffs, settlements]);
+  }, [drivers, vehicles, services, allocations, shiftScales, dayOffs, settlements, workDays]);
 
   const hasUnsavedChangesRef = useRef(false);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -252,6 +260,7 @@ export default function App() {
     shiftScales,
     dayOffs,
     settlements,
+    workDays,
     saveAllNow,
   ]);
 
@@ -321,6 +330,7 @@ export default function App() {
     shiftScales: setShiftScales,
     dayOffs: setDayOffs,
     settlements: setSettlements,
+    workDays: setWorkDays,
   };
   const settersRef = useRef(collectionSetters);
   settersRef.current = collectionSetters;
@@ -351,6 +361,7 @@ export default function App() {
       setShiftScales(payload.shiftScales);
       setDayOffs(payload.dayOffs);
       setSettlements(payload.settlements);
+      setWorkDays(payload.workDays || []);
       sharedReadyRef.current = true;
       setDataStatus('ready');
     } catch (err: any) {
@@ -643,6 +654,28 @@ export default function App() {
     });
   };
 
+  /** Início de jornada manual (exceção) de um motorista num dia; null repõe a regra */
+  const handleSetStartOverride = (driverId: string, date: string, value: string | null) => {
+    const id = workDayId(driverId, date);
+    setWorkDays(prev => {
+      const existing = prev.find(w => w.id === id);
+      if (value === null) {
+        if (!existing) return prev;
+        const { startOverride: _removed, ...rest } = existing;
+        const cleaned = { ...rest, updatedAt: new Date().toISOString(), updatedBy: session?.user?.email || undefined };
+        // Sem outros dados guardados, o registo deixa de ser necessário
+        return cleaned.note ? prev.map(w => (w.id === id ? cleaned : w)) : prev.filter(w => w.id !== id);
+      }
+      const record: WorkDayRecord = {
+        ...(existing || { id, driverId, date }),
+        startOverride: value,
+        updatedAt: new Date().toISOString(),
+        ...(session?.user?.email ? { updatedBy: session.user.email } : {}),
+      };
+      return existing ? prev.map(w => (w.id === id ? record : w)) : [...prev, record];
+    });
+  };
+
   const handleUpdateScale = (updatedScale: ShiftScaleConfig) => {
     setShiftScales(prev =>
       prev.map(s => (s.driverId === updatedScale.driverId ? updatedScale : s))
@@ -660,6 +693,11 @@ export default function App() {
     getTodayStr(),
     getNowLocalStr()
   );
+
+  // Inícios de jornada de hoje que ainda precisam de ser inseridos à mão
+  const pendingShiftStartsToday = getDayShifts(getTodayStr(), services, allocations, drivers, workDays).filter(
+    s => s.startSource === 'PENDENTE'
+  ).length;
 
   // Count services waiting for allocation (apenas serviços em aberto que ainda não terminaram)
   const nowLocal = getNowLocalStr();
@@ -741,6 +779,7 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         pendingServicesCount={pendingCount}
+        pendingShiftStartsCount={pendingShiftStartsToday}
         alertsCount={alertsSummary.alerts.length}
         criticalAlertsCount={alertsSummary.criticalCount}
         onOpenBackupModal={() => setIsBackupModalOpen(true)}
@@ -796,6 +835,16 @@ export default function App() {
             onOpenAgendaImport={() => setIsAgendaImportOpen(true)}
             onBatchAddServices={handleBatchAddServices}
             onOpenBackupModal={() => setIsBackupModalOpen(true)}
+          />
+        )}
+
+        {activeTab === 'shifts' && (
+          <ShiftsView
+            drivers={drivers}
+            services={services}
+            allocations={allocations}
+            workDays={workDays}
+            onSetStartOverride={handleSetStartOverride}
           />
         )}
 

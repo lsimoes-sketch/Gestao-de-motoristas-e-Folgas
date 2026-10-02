@@ -55,6 +55,9 @@ export interface TransportService {
   clientName: string;
   transferDirection?: AirportTransferDirection; // Opcional: Chegada ou Saída de Aeroporto
   notes?: string;
+  /** Morada completa de recolha/destino (ex.: importada da Agenda) — usada nas regras de horário */
+  originAddress?: string;
+  destinationAddress?: string;
 }
 
 export type ContractedPackage = 'PACOTE_4H' | 'PACOTE_8H' | 'AUTO_MELHOR_TARIFA';
@@ -128,4 +131,19 @@ export interface ShiftScaleConfig {
   offDays: number;
   weekendOffPattern?: WeekendOffPattern;
   weekdayOffDays?: [number, number]; // Dias de folga na semana em que trabalha ao FDS (ex: [2, 3] = Terça e Quarta)
+}
+
+/**
+ * Registo diário de um motorista (um por motorista e por dia).
+ * Guarda as exceções inseridas à mão, como o início de jornada manual.
+ */
+export interface WorkDayRecord {
+  id: string; // `${driverId}__${date}`
+  driverId: string;
+  date: string; // AAAA-MM-DD
+  /** Início de jornada inserido manualmente, AAAA-MM-DDTHH:mm (prevalece sobre a regra) */
+  startOverride?: string;
+  note?: string;
+  updatedBy?: string;
+  updatedAt?: string;
 }

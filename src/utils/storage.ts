@@ -6,6 +6,7 @@ import {
   ShiftScaleConfig,
   DayOffRecord,
   FreelancerSettlement,
+  WorkDayRecord,
 } from '../types';
 
 export const STORAGE_KEYS = {
@@ -16,6 +17,7 @@ export const STORAGE_KEYS = {
   SHIFT_SCALES: 'transfers_ops_shift_scales_v2',
   DAY_OFFS: 'transfers_ops_day_offs_v2',
   SETTLEMENTS: 'transfers_ops_settlements_v2',
+  WORK_DAYS: 'transfers_ops_work_days_v2',
   LAST_SAVED: 'transfers_ops_last_saved_v2',
 };
 
@@ -72,6 +74,7 @@ export interface AppStoragePayload {
   shiftScales: ShiftScaleConfig[];
   dayOffs: DayOffRecord[];
   settlements: FreelancerSettlement[];
+  workDays: WorkDayRecord[];
 }
 
 /**
@@ -90,6 +93,7 @@ export function saveAllToStorage(payload: AppStoragePayload): boolean {
     window.localStorage.setItem(STORAGE_KEYS.SHIFT_SCALES, JSON.stringify(payload.shiftScales));
     window.localStorage.setItem(STORAGE_KEYS.DAY_OFFS, JSON.stringify(payload.dayOffs));
     window.localStorage.setItem(STORAGE_KEYS.SETTLEMENTS, JSON.stringify(payload.settlements));
+    window.localStorage.setItem(STORAGE_KEYS.WORK_DAYS, JSON.stringify(payload.workDays || []));
     window.localStorage.setItem(STORAGE_KEYS.LAST_SAVED, new Date().toISOString());
     return true;
   } catch (err) {

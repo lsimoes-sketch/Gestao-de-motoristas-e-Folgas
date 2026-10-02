@@ -16,11 +16,13 @@ import {
   LogOut,
   UserCog,
   CloudOff,
+  Clock,
 } from 'lucide-react';
 
 export type ActiveTab =
   | 'dashboard'
   | 'services'
+  | 'shifts'
   | 'roster'
   | 'freelancer-calc'
   | 'drivers-fleet'
@@ -30,6 +32,8 @@ interface NavbarProps {
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
   pendingServicesCount: number;
+  /** Inícios de jornada de hoje ainda por preencher */
+  pendingShiftStartsCount?: number;
   alertsCount?: number;
   criticalAlertsCount?: number;
   onOpenBackupModal: () => void;
@@ -53,6 +57,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   setActiveTab,
   pendingServicesCount,
+  pendingShiftStartsCount = 0,
   alertsCount = 0,
   criticalAlertsCount = 0,
   onOpenBackupModal,
@@ -73,6 +78,13 @@ export const Navbar: React.FC<NavbarProps> = ({
       label: 'Serviços & Alocações',
       icon: Truck,
       badge: pendingServicesCount > 0 ? pendingServicesCount : undefined,
+      badgeColor: 'bg-amber-500 text-white',
+    },
+    {
+      id: 'shifts' as ActiveTab,
+      label: 'Jornadas',
+      icon: Clock,
+      badge: pendingShiftStartsCount > 0 ? pendingShiftStartsCount : undefined,
       badgeColor: 'bg-amber-500 text-white',
     },
     {

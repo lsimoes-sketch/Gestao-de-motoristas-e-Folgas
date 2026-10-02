@@ -372,6 +372,8 @@ export function parseAgendaRows(rows: SheetRow[]): AgendaParseResult {
       clientName: col(row, 'Department Name', 'Operator Name') || partner || 'Agenda A4D',
       ...(transferDirection ? { transferDirection } : {}),
       notes: notesParts.join(' • '),
+      ...(pickup ? { originAddress: pickup.replace(/\s+/g, ' ').trim() } : {}),
+      ...(dropoff ? { destinationAddress: dropoff.replace(/\s+/g, ' ').trim() } : {}),
     };
 
     lines.push({
