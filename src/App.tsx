@@ -32,6 +32,8 @@ import {
 } from './lib/sharedStore';
 import { LoginScreen } from './components/LoginScreen';
 import { TeamAccessModal } from './components/TeamAccessModal';
+import { ImportAgendaModal } from './components/ImportAgendaModal';
+import type { AgendaImportResult } from './utils/agendaImport';
 import { Loader2, ShieldX } from 'lucide-react';
 import {
   INITIAL_DRIVERS,
@@ -416,6 +418,40 @@ export default function App() {
   };
 
   const [isNewServiceModalOpen, setIsNewServiceModalOpen] = useState(false);
+  const [isAgendaImportOpen, setIsAgendaImportOpen] = useState(false);
+
+  /**
+   * Junta os dados importados da Agenda: atualiza por ID (sem duplicar),
+   * acrescenta fichas/viaturas novas e guarda nomes alternativos dos motoristas.
+   */
+  const handleImportAgenda = (result: AgendaImportResult) => {
+    const upsert = <T extends { id: string }>(prev: T[], items: T[]) => {
+      const byId = new Map(items.map(i => [i.id, i]));
+      const updated = prev.map(p => byId.get(p.id) ?? p);
+      const existing = new Set(prev.map(p => p.id));
+      return [...items.filter(i => !existing.has(i.id)), ...updated];
+    };
+
+    setDrivers(prev => {
+      let next = prev.map(d => {
+        const aliases = result.aliasUpdates[d.id];
+        if (!aliases?.length) return d;
+        return { ...d, agendaAliases: [...new Set([...(d.agendaAliases || []), ...aliases])] };
+      });
+      next = upsert(next, result.newDrivers);
+      saveToStorage(STORAGE_KEYS.DRIVERS, next);
+      return next;
+    });
+    if (result.newVehicles.length) setVehicles(prev => upsert(prev, result.newVehicles));
+    setServices(prev => upsert(prev, result.services));
+    setAllocations(prev => {
+      const importedServiceIds = new Set(result.allocations.map(a => a.serviceId));
+      const importedIds = new Set(result.allocations.map(a => a.id));
+      // Uma alocação por serviço: a da agenda substitui outra que exista para o mesmo serviço
+      const kept = prev.filter(a => !(importedServiceIds.has(a.serviceId) && !importedIds.has(a.id)));
+      return upsert(kept, result.allocations);
+    });
+  };
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
 
   // Handlers
@@ -757,6 +793,7 @@ export default function App() {
             onCompleteServiceAndSettle={handleCompleteServiceAndSettle}
             onSetServicesStatus={handleSetServicesStatus}
             onOpenNewServiceModal={() => setIsNewServiceModalOpen(true)}
+            onOpenAgendaImport={() => setIsAgendaImportOpen(true)}
             onBatchAddServices={handleBatchAddServices}
             onOpenBackupModal={() => setIsBackupModalOpen(true)}
           />
@@ -798,6 +835,15 @@ export default function App() {
 
         {activeTab === 'architecture' && <ArchitectureView />}
       </main>
+
+      <ImportAgendaModal
+        isOpen={isAgendaImportOpen}
+        onClose={() => setIsAgendaImportOpen(false)}
+        drivers={drivers}
+        vehicles={vehicles}
+        allocations={allocations}
+        onImport={handleImportAgenda}
+      />
 
       {/* Global New Service Modal */}
       <NewServiceModal

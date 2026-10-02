@@ -51,6 +51,7 @@ interface ServicesViewProps {
   onCompleteServiceAndSettle: (settlement: FreelancerSettlement) => void;
   onSetServicesStatus?: (serviceIds: string[], status: 'CONCLUIDO' | 'CANCELADO') => void;
   onOpenNewServiceModal: () => void;
+  onOpenAgendaImport?: () => void;
   onBatchAddServices?: (newServices: TransportService[]) => void;
   onOpenBackupModal?: () => void;
 }
@@ -66,6 +67,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
   onCompleteServiceAndSettle,
   onSetServicesStatus,
   onOpenNewServiceModal,
+  onOpenAgendaImport,
   onBatchAddServices,
   onOpenBackupModal,
 }) => {
@@ -115,7 +117,14 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
   }).length;
   const staleUnassignedCount = staleServices.length - staleSalariedIds.length - staleFreelancerCount;
 
-  const visibleServices = showOnlyStale ? staleServices : services;
+  // Ordem: dias mais recentes primeiro; dentro de cada dia, por hora
+  const byDayThenTime = (a: TransportService, b: TransportService) => {
+    const da = a.scheduledStart.slice(0, 10);
+    const db = b.scheduledStart.slice(0, 10);
+    if (da !== db) return db.localeCompare(da);
+    return a.scheduledStart.localeCompare(b.scheduledStart);
+  };
+  const visibleServices = [...(showOnlyStale ? staleServices : services)].sort(byDayThenTime);
 
   const handleCompleteService = (service: TransportService) => {
     onSetServicesStatus?.([service.id], 'CONCLUIDO');
@@ -229,6 +238,17 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
+          {onOpenAgendaImport && (
+            <button
+              onClick={onOpenAgendaImport}
+              className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-colors shadow-sm flex items-center gap-2"
+              title="Importar o planeamento do dia exportado da Agenda da plataforma Alliance4Drive (Exportar Excel)"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              <span>Importar Agenda (Excel)</span>
+            </button>
+          )}
+
           {onBatchAddServices && (
             <button
               onClick={() => setIsImportModalOpen(true)}

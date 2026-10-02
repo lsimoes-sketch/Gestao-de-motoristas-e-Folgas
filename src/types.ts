@@ -18,6 +18,8 @@ export interface Driver {
   licenseNumber: string;
   camExpiryDate?: string; // CAM date if MISTO_PESADOS
   active: boolean;
+  /** Nomes com que o motorista aparece na Agenda da plataforma (ex.: "P. Lourenço") */
+  agendaAliases?: string[];
 }
 
 export type VehicleCategory = 'LIGEIROS' | 'PESADOS_PASSAGEIROS';
