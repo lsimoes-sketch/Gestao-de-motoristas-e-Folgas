@@ -12,6 +12,14 @@
  *  • Qualquer outro primeiro serviço: assinalado para inserir o início manualmente.
  * Um início inserido manualmente (exceção) prevalece sempre sobre o calculado.
  *
+ * REGRA 2 — Fim de jornada (02/10/2026): espelho da regra 1, aplicada ao ÚLTIMO
+ * serviço do dia, com os mesmos tempos e exceções, SOMADOS à hora em que esse
+ * serviço termina (real, se existir; senão a prevista), conforme o local onde termina:
+ *  • termina no Aeroporto de Lisboa → +30 min em ponta / +15 min fora;
+ *  • termina numa morada da cidade de Lisboa → +1h15 em ponta / +1h fora;
+ *  • termina noutro sítio → assinalado para inserir o fim manualmente.
+ * A hora de ponta é avaliada na hora de fim do último serviço.
+ *
  * Os valores estão em SHIFT_RULES_CONFIG para poderem ser ajustados num só sítio.
  */
 import { TransportService, Allocation, Driver, WorkDayRecord } from '../types';
@@ -159,6 +167,18 @@ function minusMinutes(dateTime: string, minutes: number): string {
   return `${day}T${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
 
+function plusMinutes(dateTime: string, minutes: number): string {
+  const [date, time] = dateTime.split('T');
+  const [h, m] = time.split(':').map(Number);
+  let total = h * 60 + m + minutes;
+  let day = date;
+  while (total >= 1440) {
+    total -= 1440;
+    day = addDays(day, 1);
+  }
+  return `${day}T${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
 function originText(s: TransportService): string {
   return s.originAddress || s.origin || '';
 }
@@ -228,6 +248,72 @@ export function computeShiftStart(first: TransportService): StartRuleResult {
 }
 
 /* ------------------------------------------------------------------ */
+/* Regra 2: fim de jornada                                             */
+/* ------------------------------------------------------------------ */
+
+export type EndRuleKind = 'FIM_AEROPORTO' | 'FIM_LISBOA' | 'MANUAL';
+
+export interface EndRuleResult {
+  kind: EndRuleKind;
+  peak: boolean;
+  dayKind: DayKind;
+  trailMinutes?: number;
+  /** Fim do último serviço usado como base (real ou previsto) */
+  serviceEnd: string;
+  serviceEndIsActual: boolean;
+  /** Fim de jornada calculado, AAAA-MM-DDTHH:mm (undefined se for manual) */
+  calculatedEnd?: string;
+  explanation: string;
+}
+
+export function computeShiftEnd(last: TransportService, actualEnd?: string): EndRuleResult {
+  const serviceEnd = actualEnd || last.scheduledEnd;
+  const [date, time] = serviceEnd.split('T');
+  const dayKind = getDayKind(date);
+  const peak = isPeakTime(date, time);
+  const periodLabel = peak
+    ? 'hora de ponta'
+    : dayKind === 'FERIADO'
+    ? `feriado (${getHolidayName(date)})`
+    : dayKind === 'FIM_DE_SEMANA'
+    ? 'fim de semana'
+    : 'fora da hora de ponta';
+  const endLabel = `${actualEnd ? 'fim real' : 'fim previsto'} às ${time}`;
+  const destination = destinationText(last);
+  const trailLabel = (n: number) =>
+    n >= 60 ? `${Math.floor(n / 60)}h${n % 60 ? String(n % 60).padStart(2, '0') : ''}` : `${n} min`;
+  const base = { peak, dayKind, serviceEnd, serviceEndIsActual: !!actualEnd };
+
+  if (isLisbonAirport(destination)) {
+    const n = peak ? SHIFT_RULES_CONFIG.arrivalAirport.peakMinutes : SHIFT_RULES_CONFIG.arrivalAirport.offPeakMinutes;
+    return {
+      ...base,
+      kind: 'FIM_AEROPORTO',
+      trailMinutes: n,
+      calculatedEnd: plusMinutes(serviceEnd, n),
+      explanation: `Termina no Aeroporto de Lisboa (${endLabel}), ${periodLabel}: +${trailLabel(n)}`,
+    };
+  }
+  if (isLisbonAddress(destination)) {
+    const n = peak ? SHIFT_RULES_CONFIG.departureLisbon.peakMinutes : SHIFT_RULES_CONFIG.departureLisbon.offPeakMinutes;
+    return {
+      ...base,
+      kind: 'FIM_LISBOA',
+      trailMinutes: n,
+      calculatedEnd: plusMinutes(serviceEnd, n),
+      explanation: `Termina em morada de Lisboa (${endLabel}), ${periodLabel}: +${trailLabel(n)}`,
+    };
+  }
+
+  let why = 'termina fora da cidade de Lisboa';
+  if (isAirport(destination)) why = 'termina num aeroporto que não é o de Lisboa';
+  else if (!destination.trim()) why = 'o último serviço não tem local de fim';
+  else if (!/\b\d{4}-\d{3}\b/.test(destination) && !/\blisboa\b|\blisbon\b/i.test(destination))
+    why = 'local de fim sem código postal (reimporte a Agenda ou insira à mão)';
+  return { ...base, kind: 'MANUAL', explanation: `Inserir manualmente: ${why}` };
+}
+
+/* ------------------------------------------------------------------ */
 /* Jornadas do dia                                                     */
 /* ------------------------------------------------------------------ */
 
@@ -243,6 +329,12 @@ export interface DriverDayShift {
   startSource: 'MANUAL' | 'REGRA' | 'PENDENTE';
   /** Fim do último serviço (real se existir, senão previsto) */
   lastEnd: string;
+  /** Último serviço do dia (o que termina mais tarde) */
+  last: TransportService;
+  endRule: EndRuleResult;
+  /** Fim que conta: manual (exceção) > calculado pela regra */
+  effectiveEnd?: string;
+  endSource: 'MANUAL' | 'REGRA' | 'PENDENTE';
 }
 
 export function workDayId(driverId: string, date: string): string {
@@ -279,11 +371,17 @@ export function getDayShifts(
     const record = workDays.find(w => w.id === workDayId(driverId, date));
     const manual = record?.startOverride;
     const effectiveStart = manual || rule.calculatedStart;
-    const lastEnd = list
-      .map(x => x.allocation.actualEnd || x.service.scheduledEnd)
-      .sort()
-      .slice(-1)[0];
+    const lastItem = list.reduce((acc, x) =>
+      (x.allocation.actualEnd || x.service.scheduledEnd) >= (acc.allocation.actualEnd || acc.service.scheduledEnd) ? x : acc
+    );
+    const lastEnd = lastItem.allocation.actualEnd || lastItem.service.scheduledEnd;
+    const endRule = computeShiftEnd(lastItem.service, lastItem.allocation.actualEnd);
+    const manualEnd = record?.endOverride;
     result.push({
+      last: lastItem.service,
+      endRule,
+      effectiveEnd: manualEnd || endRule.calculatedEnd,
+      endSource: manualEnd ? 'MANUAL' : endRule.calculatedEnd ? 'REGRA' : 'PENDENTE',
       driver,
       date,
       services: list,

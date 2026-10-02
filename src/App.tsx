@@ -654,24 +654,22 @@ export default function App() {
     });
   };
 
-  /** Início de jornada manual (exceção) de um motorista num dia; null repõe a regra */
-  const handleSetStartOverride = (driverId: string, date: string, value: string | null) => {
+  /** Início/fim de jornada manual (exceção) de um motorista num dia; null repõe a regra */
+  const handleSetShiftOverride = (driverId: string, date: string, edge: 'start' | 'end', value: string | null) => {
     const id = workDayId(driverId, date);
+    const field = edge === 'start' ? 'startOverride' : 'endOverride';
     setWorkDays(prev => {
       const existing = prev.find(w => w.id === id);
+      const audit = { updatedAt: new Date().toISOString(), ...(session?.user?.email ? { updatedBy: session.user.email } : {}) };
       if (value === null) {
         if (!existing) return prev;
-        const { startOverride: _removed, ...rest } = existing;
-        const cleaned = { ...rest, updatedAt: new Date().toISOString(), updatedBy: session?.user?.email || undefined };
-        // Sem outros dados guardados, o registo deixa de ser necessário
-        return cleaned.note ? prev.map(w => (w.id === id ? cleaned : w)) : prev.filter(w => w.id !== id);
+        const cleaned: WorkDayRecord = { ...existing, ...audit };
+        delete cleaned[field];
+        // Sem nenhuma exceção guardada, o registo deixa de ser necessário
+        const empty = !cleaned.startOverride && !cleaned.endOverride && !cleaned.note;
+        return empty ? prev.filter(w => w.id !== id) : prev.map(w => (w.id === id ? cleaned : w));
       }
-      const record: WorkDayRecord = {
-        ...(existing || { id, driverId, date }),
-        startOverride: value,
-        updatedAt: new Date().toISOString(),
-        ...(session?.user?.email ? { updatedBy: session.user.email } : {}),
-      };
+      const record: WorkDayRecord = { ...(existing || { id, driverId, date }), [field]: value, ...audit };
       return existing ? prev.map(w => (w.id === id ? record : w)) : [...prev, record];
     });
   };
@@ -694,9 +692,9 @@ export default function App() {
     getNowLocalStr()
   );
 
-  // Inícios de jornada de hoje que ainda precisam de ser inseridos à mão
+  // Jornadas de hoje com início ou fim ainda por inserir à mão
   const pendingShiftStartsToday = getDayShifts(getTodayStr(), services, allocations, drivers, workDays).filter(
-    s => s.startSource === 'PENDENTE'
+    s => s.startSource === 'PENDENTE' || s.endSource === 'PENDENTE'
   ).length;
 
   // Count services waiting for allocation (apenas serviços em aberto que ainda não terminaram)
@@ -844,7 +842,7 @@ export default function App() {
             services={services}
             allocations={allocations}
             workDays={workDays}
-            onSetStartOverride={handleSetStartOverride}
+            onSetOverride={handleSetShiftOverride}
           />
         )}
 

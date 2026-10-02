@@ -32,7 +32,7 @@ interface NavbarProps {
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
   pendingServicesCount: number;
-  /** Inícios de jornada de hoje ainda por preencher */
+  /** Jornadas de hoje com início ou fim ainda por preencher */
   pendingShiftStartsCount?: number;
   alertsCount?: number;
   criticalAlertsCount?: number;

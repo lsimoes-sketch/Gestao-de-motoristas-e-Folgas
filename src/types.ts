@@ -143,6 +143,8 @@ export interface WorkDayRecord {
   date: string; // AAAA-MM-DD
   /** Início de jornada inserido manualmente, AAAA-MM-DDTHH:mm (prevalece sobre a regra) */
   startOverride?: string;
+  /** Fim de jornada inserido manualmente, AAAA-MM-DDTHH:mm (prevalece sobre a regra) */
+  endOverride?: string;
   note?: string;
   updatedBy?: string;
   updatedAt?: string;
